@@ -171,9 +171,10 @@ yours.
 | D7 | Inboxes | How many are warming? Since when? Daily limit per inbox? | Need your numbers. Default 30 a day each once warmup is past 2 weeks. |
 | D8 | CAN-SPAM details | Which postal address (a USPS PO box is fine)? How does the footer say it's an offer? Wording of the unsubscribe line? | You decide the wording; the code makes sure it's in every email. |
 | D9 | Sequence shape | Number of steps, gap between them, one offer per campaign or mixed | 3 plain-text emails (day 0, +3, +7). One offer per campaign. Stop on reply. Open and link tracking off. |
-| D10 | Apollo account | Free on a work email, or Basic | Free on a work email for month 1 |
+| D10 | Apollo account | Free on a work email, or Basic | Free for month 1. The team account already works with the API (the teammate's test runs succeeded). Use a new dedicated key for this pipeline, not the master key. |
 | D11 | Re-contact | Contact a person once ever? Once per offer? Again after N months? | Once per offer. Never again after a reply, unsubscribe or bounce. |
 | D12 | Where the database lives | One person's laptop, or a shared machine? Backups? | One machine (whoever runs it), with a daily private backup. Never in git. |
+| D13 | AI-written first line per email | (a) No, same template for all. (b) Yes: an AI model writes one line from the company data, and a person approves it. The teammate's prototype did this with Claude. | Snooze until sending works end to end. Then test it as a variant against the plain template. |
 
 ## Build order
 

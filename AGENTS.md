@@ -10,7 +10,7 @@ automation, and outsourced front-end developers. Owner: Wania.
 Read before doing anything:
 
 - `docs/research.md`: facts about each tool, with sources.
-- `docs/plan.md`: the design, the build order, and the decisions table (D1–D12).
+- `docs/plan.md`: the design, the build order, and the decisions table (D1–D13).
 
 ## How build steps work
 

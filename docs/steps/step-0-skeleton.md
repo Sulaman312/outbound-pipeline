@@ -68,7 +68,7 @@ database: data/outbound.db
 # Set by Wania. Don't raise without a go-ahead.
 caps:
   apollo:
-    credits: 75   # Apollo free plan allowance (about 900 a year)
+    credits: 75   # Free plan shows 100/month; the account is shared, so this stays below it
 ```
 
 ## 4. `src/outbound/config.py`
