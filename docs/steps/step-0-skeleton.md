@@ -68,7 +68,7 @@ database: data/outbound.db
 # Set by Wania. Don't raise without a go-ahead.
 caps:
   apollo:
-    credits: 75   # Free plan shows 100/month; the account is shared, so this stays below it
+    credits: 75   # Low placeholder. Wania sets the real monthly cap in step 1.
 ```
 
 ## 4. `src/outbound/config.py`

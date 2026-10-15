@@ -126,6 +126,7 @@ recorded here.
 
 ### What it means for us
 
+- **Decision (2026-10-15):** the team bought Apollo Basic (see D10 in the plan).
 - **Update (October 2026):** Apollo Free can't be used by API at all for this. The points below
   hold only on a paid plan (Basic $49/user/month billed annually, 30,000 credits a year; the
   monthly-billing price is **Unconfirmed**). Apollo has no free trial of its paid plans.
