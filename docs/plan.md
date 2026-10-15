@@ -48,7 +48,7 @@ Code does the repeatable parts. Paid tools are used only where they're needed.
 
 | Step | Tool | Done by | Why this tool |
 |---|---|---|---|
-| Find companies | Apollo Organization Search | code | Free plan covers it (1 credit per 100 companies). Filters by headcount and returns the domain. |
+| Find companies | **Open: D10.** Apollo Organization Search (paid plan only) or Clay "Find companies" | code or Clay | Apollo: 1 credit per 100 companies, filters by headcount, returns the domain. Its Free plan has no API access. |
 | Find local businesses | Google Places, or Clay's own Google Maps source | code or Clay | Only if D2 is decided |
 | Find person, email, check it | Clay | you, by hand (CSV in and out) | Best email-finding coverage. Its API is the $495 plan. |
 | Re-check maybes | Instantly verifier | code | 0.25 credits per email, with a catch-all check |
@@ -66,7 +66,7 @@ These are **estimates** to plan with. Month 1 replaces them with real numbers.
 | Inboxes needed | about 8 | 5,000 ÷ 22 days ≈ 230 a day, at 30 per inbox (D7) |
 | Sendable emails Clay must deliver | 1,000–1,600 a month | to fill the above |
 | Companies to feed Clay | 2,000–3,200 | assumes about 50% of companies give a sendable email (we'll measure this) |
-| Apollo credits | 20–32 | free plan has about 75 ✔ |
+| Apollo credits | 20–32 | only if D10 = Apollo Basic (about 2,500 a month) |
 | Clay finished leads | Free about 75–150, one trial about 750–2,000, Launch 1,900+ | **the real bottleneck (D3)** |
 | Instantly checks for maybes | about 300–500 = 75–125 credits | Nano credits ($9, 150 credits) ✔ |
 | Positive replies | about 7–30 per 1,000 people | reply-rate benchmarks |
@@ -116,9 +116,8 @@ Anything that would call a paid API only shows what it would do, unless you add 
 6. **Every email has a postal address,** an unsubscribe line and the unsubscribe header.
    Opt-outs sync at least daily, to meet the 48-hour rule.
 7. **Each API client only calls the endpoints it's allowed to.** Every client has a fixed list of
-   paths and refuses anything else. This matters most for Apollo: the account only allows a
-   master key (it can do anything), so the code limits it to `mixed_companies/search` and
-   `mixed_people/api_search`.
+   paths and refuses anything else. This matters most when a provider only offers keys that can
+   do everything (like an Apollo master key).
 8. **Secrets live only in `.env`.** `data/` and lead CSVs are never committed, because they hold
    personal data.
 9. **Tests run offline.** HTTP is faked; no test needs a real key.
@@ -166,7 +165,7 @@ yours.
 
 | # | Question | Options | Suggestion |
 |---|---|---|---|
-| D1 | Which source for which offer? | (a) Apollo for both offers. (b) Apollo for front-end, Google Maps for AI automation at local businesses. (c) Both sources for both. | Month 1: (a) Apollo only. It's the cheapest, it filters by headcount and it gives domains. Add local businesses in month 2. |
+| D1 | Which source for which offer? | (a) Apollo for both offers. (b) Apollo for front-end, Google Maps for AI automation at local businesses. (c) Both sources for both. | Depends on D10. Start with one source for month 1, and add local businesses in month 2. |
 | D2 | Google Maps, given Google's ban on storing Places data | (a) Use the Places API and accept the risk. (b) Use Clay's own Google Maps source instead. (c) Skip Google Maps. | Decide in month 2. If yes, (b) keeps us off Google's terms, but it uses Clay rows. |
 | D3 | Clay: which plan, how many accounts | (a) Free only, about 75–150 a month. (b) Trials rotated: about 750–2,000 each, 50-row tables, terms risk. (c) Launch $185/mo. Also worth one test as email sources: Apollo Basic ($49), Instantly SuperSearch credits. | Month 1: one trial plus the free plan, with every batch recorded. Then compare real cost per lead and pick (b) or (c). |
 | D4 | Maybes and catch-alls | Instantly re-checks maybes. If still catch-all or unknown: (a) drop, (b) hold, (c) send a capped share. | Buy Nano credits ($9). Hold in month 1. Test a 10% share in month 2 if bounces stay under 1%. |
@@ -175,7 +174,7 @@ yours.
 | D7 | Inboxes | How many are warming? Since when? Daily limit per inbox? | Need your numbers. Default 30 a day each once warmup is past 2 weeks. |
 | D8 | CAN-SPAM details | Which postal address (a USPS PO box is fine)? How does the footer say it's an offer? Wording of the unsubscribe line? | You decide the wording; the code makes sure it's in every email. |
 | D9 | Sequence shape | Number of steps, gap between them, one offer per campaign or mixed | 3 plain-text emails (day 0, +3, +7). One offer per campaign. Stop on reply. Open and link tracking off. |
-| D10 | Apollo account | Free on a work email, or Basic | Free for month 1. The team account already works with the API (the teammate's test runs succeeded). Use a new dedicated key for this pipeline, not the master key. |
+| D10 | **Where companies come from** (Apollo Free has no API access; confirmed Oct 2026) | (a) Apollo Basic ($49/mo annual; monthly price higher): full API for companies, people and emails, about 2,500 credits a month. Its emails could replace much of Clay's job. (b) Clay "Find companies": free list building, but 200-row tables on Free; Clay then does companies, people and emails in one table. (c) Apollo website on Free, by hand: CSV export 25 at a time. Slow. (d) Google Places API: see D2. | (a) if about $50–60 a month is OK: sourcing stays automatic, and it may save the $185 Clay Launch plan. Otherwise (b): $0, one tool fewer, but by hand and row-limited. |
 | D11 | Re-contact | Contact a person once ever? Once per offer? Again after N months? | Once per offer. Never again after a reply, unsubscribe or bounce. |
 | D12 | Where the database lives | One person's laptop, or a shared machine? Backups? | One machine (whoever runs it), with a daily private backup. Never in git. |
 | D13 | AI-written first line per email | (a) No, same template for all. (b) Yes: an AI model writes one line from the company data, and a person approves it. The teammate's prototype did this with Claude. | Snooze until sending works end to end. Then test it as a variant against the plain template. |
@@ -192,7 +191,7 @@ made. A coding agent implements exactly one file per task. Ready so far:
 | Step | What | Needs |
 |---|---|---|
 | 0 | Skeleton: pyproject, config loading, SQLite schema, `check`, CI (ruff and pytest). No network. | nothing |
-| 1 | Apollo company sourcing. First live test: 1 page = 1 credit. | D1, D10 |
+| 1 | Company sourcing (Apollo API or a Clay companies CSV, per D10). First live test is tiny. | D1, D10 |
 | 2 | Clay CSV export and import, batches, `docs/clay-table.md`. Built after you make the first Clay table, so we copy its real column names. | D3 |
 | 3 | Rules and the Instantly verifier. First live test: 1 email. | D4, D5 |
 | 4 | Campaign from a file, and pushing leads. First live test: one campaign left as a draft. | D6–D9 |

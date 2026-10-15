@@ -61,6 +61,8 @@ Paging: up to 100 results per page and 500 pages, so 50,000 records per search a
 - **Basic:** $49 per user per month billed annually, 30,000 credits a year. Professional is $79,
   Organization is $119 with 3 users minimum. These come from Apollo's own blog; check
   apollo.io/pricing.
+- **Superseded:** the team's portal shows that Free has no API access to these endpoints at all.
+  See "What the team's own test showed" below. The docs at the time said:
 - **Free accounts must be registered with a work email** to use People Search, Organization
   Search and enrichment through the API. Free accounts on a personal email (gmail etc.) are blocked
   from these endpoints. Paid accounts aren't affected.
@@ -111,19 +113,27 @@ recorded here.
     parameters are being deprecated.
   - Search filters go as URL query parameters (`person_titles[]=...`) on a POST.
 - **Cost seen:** about 1 credit per enriched person, so roughly 48 credits for 48 leads.
-- **Key scoping on this account:** when creating a normal (scoped) key, `mixed_people/api_search`
-  and `mixed_companies/search` are greyed out in the endpoint list (October 2026). Apollo's docs
-  say Organization Search accepts a scoped key, so this is likely a free-plan restriction
-  (**Unconfirmed**). In practice we need a master key.
-- **Unconfirmed:** whether this free account can call Organization Search at all. The test runs
-  only used People Search and enrichment. Step 1's first 1-credit call answers it.
+- **The Free plan has no API access to search or enrichment** (confirmed in the team's developer
+  portal, October 2026). The key dialog says these APIs "aren't included in your Free plan and
+  won't be accessible even with a master key. All paid plans include full API access." The listed
+  endpoints include:
+  - `people/bulk_match`, `people/match` and `people/show`;
+  - `organizations/show`;
+  - `mixed_people/api_search` and `mixed_companies/search`;
+  - `phone/validate` and `agents/task`.
+- So the September test runs either happened before this restriction, or on a trial. The warning
+  icon on the old "lead scrape for arsuno.ai" key probably means it lost access (**Unconfirmed**).
 
 ### What it means for us
 
-- Apollo free is good for **finding companies**: 75 credits is about 7,500 companies a month
-  through Organization Search. It's also good for **seeing who works there** (People Search,
-  free).
-- It is **not an email source** on the free plan: about 75 emails a month.
+- **Update (October 2026):** Apollo Free can't be used by API at all for this. The points below
+  hold only on a paid plan (Basic $49/user/month billed annually, 30,000 credits a year; the
+  monthly-billing price is **Unconfirmed**). Apollo has no free trial of its paid plans.
+- On a paid plan, Apollo is good for **finding companies**: 1 credit per 100 companies through
+  Organization Search. It's also good for **seeing who works there** (People Search, free).
+- On Free it is **not an email source** either: about 100 credits a month.
+- Apollo's website on Free allows CSV export, but only 25 records at a time, and each net-new
+  person with an email costs 1 credit.
 - People Search results can't go straight into email finding, because last names are masked and
   there's no domain. So the flow is: companies (with domain) from Apollo, then Clay finds the
   person and the email.
