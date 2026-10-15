@@ -1,48 +1,11 @@
-# outbound
+# outbound-pipeline
 
-The Arsuno outbound pipeline. Design: [ARCHITECTURE.md](ARCHITECTURE.md).
+Cold email pipeline for Arsuno. It targets US companies with 1–20 employees, with two offers: AI
+automation, and outsourced front-end developers.
 
-## Setup
+**Status:** research and design are done. No code yet.
 
-```bash
-git clone https://github.com/wania4264/outbound-pipeline.git && cd outbound-pipeline
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env      # then fill in the keys you have
-```
-
-## Use
-
-```bash
-outbound check                                  # config valid? which keys are set?
-outbound source --icp A --country US            # dry run: prints the requests, calls nothing
-outbound source --icp A --country US --live     # calls Apollo (0 credits) and stores leads
-outbound stats                                  # leads per stage, API requests this month
-outbound export --icp A --stage sourced         # CSV in data/exports/
-outbound suppress --domain acme.com --reason "asked to stop"
-```
-
-## Tests and lint
-
-```bash
-pytest
-ruff check . && ruff format --check .
-```
-
-Tests use fake APIs only; they never call a provider or need a key.
-
-## Layout
-
-```
-config/                 everything you change without touching code (ICPs, countries, budgets)
-src/outbound/
-  models.py             the Lead format shared by every stage
-  config.py             loads and validates config/
-  store.py              SQLite: leads, raw provider data, runs, usage, suppression
-  http.py               one HTTP client: retries, pacing, monthly caps
-  normalize.py          domains, names, dedupe keys
-  sources/              one adapter per lead source (apollo, google_places)
-  stages/sourcing.py    stage 1
-  export.py, cli.py
-tests/
-```
+- [docs/research.md](docs/research.md) covers what Apollo, Google Places, Clay and Instantly can
+  and can't do, what they cost, and the rules (CAN-SPAM, Gmail/Yahoo/Microsoft), with sources.
+- [docs/plan.md](docs/plan.md) covers the pipeline, one month in numbers, the build order, and the
+  decisions waiting on Wania.
