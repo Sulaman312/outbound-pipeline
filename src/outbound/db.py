@@ -155,6 +155,16 @@ def list_companies(conn: sqlite3.Connection, segment: str | None = None) -> list
     return conn.execute(sql + " ORDER BY id", params).fetchall()
 
 
+def raw_records(conn: sqlite3.Connection, segment: str | None = None) -> list[str]:
+    """The provider's original JSON for each saved company."""
+    sql = "SELECT raw FROM companies WHERE raw IS NOT NULL"
+    params: tuple[str, ...] = ()
+    if segment:
+        sql += " AND segment = ?"
+        params = (segment,)
+    return [row["raw"] for row in conn.execute(sql + " ORDER BY id", params)]
+
+
 def count_companies(conn: sqlite3.Connection) -> dict[str, int]:
     """Number of saved companies per segment."""
     rows = conn.execute("SELECT segment, COUNT(*) AS n FROM companies GROUP BY segment").fetchall()

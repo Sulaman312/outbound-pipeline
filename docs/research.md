@@ -127,6 +127,18 @@ recorded here.
 ### What it means for us
 
 - **Decision (2026-10-15):** the team bought Apollo Basic (see D10 in the plan).
+- **First live run (2026-10-15):**
+  - The `ai_accounting` segment found about 82,300 matching companies. Of the first 100, 96 had
+    a website.
+  - Organization Search left our employee, country, city and industry columns empty for all
+    100. Either it doesn't return those fields or it names them differently. `outbound fields`
+    lists what it did send.
+  - Until that's known, the "not US" and "over 20 staff" checks can't fire, and we rely on
+    Apollo's own filters. Person enrichment returns full company details (seen in the
+    teammate's data), so those checks can run at the email step at no extra cost.
+  - About 1 in 10 results were off-target, matching the keyword "accounting" without being
+    firms: a podcast, a Malta job board, staffing agencies, a trade publication, a course
+    provider.
 - **Update (October 2026):** Apollo Free can't be used by API at all for this. The points below
   hold only on a paid plan (Basic $49/user/month billed annually, 30,000 credits a year; the
   monthly-billing price is **Unconfirmed**). Apollo has no free trial of its paid plans.

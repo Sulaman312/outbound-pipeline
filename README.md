@@ -16,6 +16,8 @@ automation, and outsourced front-end developers.
 
 Next comes finding the right person and email at each company. See [docs/plan.md](docs/plan.md).
 
+- [docs/how-it-works.md](docs/how-it-works.md) explains the code in plain words: what happens on
+  each run, and what each file does.
 - [docs/research.md](docs/research.md) covers what each tool can do, its costs and the rules, with
   sources.
 - [docs/plan.md](docs/plan.md) covers the design, what's built, the build order, and open
@@ -132,6 +134,7 @@ spending more credits. Apollo's original data for every company is saved too.
 | `outbound source SEGMENT --live --pages 5` | The same for 5 pages | up to 5 credits |
 | `outbound export` | All saved companies to a CSV (`--segment S` for one segment) | free |
 | `outbound suppress acme.com --reason "client"` | Never contact this domain (or email). Can't be undone. | free |
+| `outbound fields` | Which fields Apollo sent, with counts. Names only, so it's safe to share. | free |
 
 On Windows, put `.venv\Scripts\` in front of each command, for example
 `.venv\Scripts\outbound check`.

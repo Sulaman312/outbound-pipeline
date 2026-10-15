@@ -6,6 +6,7 @@ Commands:
   outbound source SEGMENT --live         runs it for real (spends Apollo credits)
   outbound export [--segment S]          writes saved companies to a CSV file
   outbound suppress VALUE --reason TEXT  adds a domain or email to the do-not-contact list
+  outbound fields [--segment S]          which fields Apollo sent (names and counts, no values)
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from outbound.config import (
     load_settings,
 )
 from outbound.http import new_client
-from outbound.steps import export, source, suppress
+from outbound.steps import export, fields, source, suppress
 
 MAX_PAGES_PER_RUN = 50
 
@@ -144,6 +145,17 @@ def cmd_suppress(
     return 0
 
 
+def cmd_fields(
+    args: argparse.Namespace,
+    settings: Settings,
+    segments: dict[str, Segment],
+    conn: sqlite3.Connection,
+) -> int:
+    total, counts = fields.field_counts(conn, args.segment)
+    print(fields.describe(total, counts))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="outbound", description="Arsuno outbound pipeline")
     parser.add_argument("--root", default=".", help="project folder (default: the current folder)")
@@ -169,6 +181,10 @@ def build_parser() -> argparse.ArgumentParser:
     sup.add_argument("value", help="a domain like acme.com, or an email")
     sup.add_argument("--reason", required=True, help='why, like "existing client"')
     sup.set_defaults(func=cmd_suppress)
+
+    fld = commands.add_parser("fields", help="which fields Apollo sent (names and counts only)")
+    fld.add_argument("--segment", help="only this segment")
+    fld.set_defaults(func=cmd_fields)
     return parser
 
 

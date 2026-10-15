@@ -115,3 +115,23 @@ def test_suppress(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert call(project, "suppress", "Jane@Acme.com", "--reason", "asked") == 0
     assert "added: email jane@acme.com" in capsys.readouterr().out
     assert call(project, "suppress", "not valid", "--reason", "x") == 2
+
+
+def test_fields_lists_names_never_values(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert call(project, "fields") == 0
+    assert "No saved companies yet" in capsys.readouterr().out
+
+    records = [org(1, phone="555-0100-unique"), org(2, phone=None)]
+    monkeypatch.setattr(cli, "new_client", FakeApollo((200, page(records))).client)
+    monkeypatch.setenv("APOLLO_API_KEY", "key")
+    call(project, "source", "ai_accounting", "--live")
+    capsys.readouterr()
+
+    assert call(project, "fields") == 0
+    out = capsys.readouterr().out
+    assert "Fields in 2 saved records" in out
+    assert any(line.split() == ["phone", "1"] for line in out.splitlines())
+    assert any(line.split() == ["primary_domain", "2"] for line in out.splitlines())
+    assert "555-0100-unique" not in out
