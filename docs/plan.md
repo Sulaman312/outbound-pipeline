@@ -78,10 +78,10 @@ or email before?", which CSV files are bad at.
 
 | Table | Key columns | Rule |
 |---|---|---|
-| `companies` | id, source, source_id, name, domain, city, state, segment, raw, status, created_at | **Unique domain**: a company enters once, from whichever source finds it first. Status goes `new` → `exported` → `enriched` or `no_contact`. |
+| `companies` | id, source, source_id, name, domain, city, state, employees, segment, raw, status, created_at | **Unique domain**: a company enters once, from whichever source finds it first. Status goes `new` → `exported` → `enriched` or `no_contact`. |
 | `contacts` | id, company_id, first_name, last_name, title, email, clay_status, verify_status, decision, reason, campaign, instantly_lead_id, state, timestamps | **Unique email.** Decision is `send`, `drop` or `hold`. State goes `ready` → `pushed` → `finished`, `replied`, `bounced` or `unsubscribed`. |
 | `batches` | id, file, rows, clay_account, exported_at, imported_at, emails_found | One row per Clay CSV round trip. This gives the real cost per lead for each Clay account or plan. |
-| `suppression` | value, kind (email or domain), reason, added_at | **Never deleted.** Checked before Clay and again before sending. If someone asks for their data to be deleted, we delete it and store only a one-way hash of their email here, so we never contact them again. |
+| `suppression` | value, kind (email, domain or email_hash), reason, added_at | **Never deleted.** Checked before Clay and again before sending. If someone asks for their data to be deleted, we delete it and store only a one-way hash of their email here, so we never contact them again. |
 | `usage` | provider, month, units | Counts API spend so monthly caps are enforced (Google 1,000 requests, Apollo credits, Instantly credits) |
 
 `raw` stores the provider's original response, so a mapping mistake is fixed by re-reading the
@@ -179,6 +179,10 @@ yours.
 
 Each step is small, tested, and usable on its own. Each one starts as a dry run, then gets one
 tiny live test, and only with your go-ahead.
+
+Each step gets its own instruction file in `docs/build/`, written once the decisions it needs are
+made. A coding agent implements exactly one file per task. Ready so far:
+[step 0](build/step-0-skeleton.md).
 
 | Step | What | Needs |
 |---|---|---|
