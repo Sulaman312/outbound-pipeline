@@ -180,9 +180,9 @@ yours.
 Each step is small, tested, and usable on its own. Each one starts as a dry run, then gets one
 tiny live test, and only with your go-ahead.
 
-Each step gets its own instruction file in `docs/build/`, written once the decisions it needs are
+Each step gets its own instruction file in `docs/steps/`, written once the decisions it needs are
 made. A coding agent implements exactly one file per task. Ready so far:
-[step 0](build/step-0-skeleton.md).
+[step 0](steps/step-0-skeleton.md).
 
 | Step | What | Needs |
 |---|---|---|

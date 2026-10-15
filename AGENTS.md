@@ -14,7 +14,7 @@ Read before doing anything:
 
 ## How build steps work
 
-- Each step is specified in `docs/build/step-N-*.md`. One task means one step file, and nothing
+- Each step is specified in `docs/steps/step-N-*.md`. One task means one step file, and nothing
   beyond it. Don't start the next step.
 - If the step file is unclear, or something needs a choice it doesn't make, stop and ask. Don't
   pick.
