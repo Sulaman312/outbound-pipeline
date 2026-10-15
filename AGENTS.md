@@ -45,6 +45,7 @@ Read before doing anything:
 
 - Keep it basic:
   - Plain functions and small modules, each with a docstring at the top.
+  - All SQL lives in `src/outbound/db.py`. Other modules call its functions and never write SQL.
   - Standard library first. Add a dependency only when a step file says so.
   - No base classes, registries, plugin systems or "manager" objects until a second real use
     exists.
