@@ -111,6 +111,12 @@ recorded here.
     parameters are being deprecated.
   - Search filters go as URL query parameters (`person_titles[]=...`) on a POST.
 - **Cost seen:** about 1 credit per enriched person, so roughly 48 credits for 48 leads.
+- **Key scoping on this account:** when creating a normal (scoped) key, `mixed_people/api_search`
+  and `mixed_companies/search` are greyed out in the endpoint list (October 2026). Apollo's docs
+  say Organization Search accepts a scoped key, so this is likely a free-plan restriction
+  (**Unconfirmed**). In practice we need a master key.
+- **Unconfirmed:** whether this free account can call Organization Search at all. The test runs
+  only used People Search and enrichment. Step 1's first 1-credit call answers it.
 
 ### What it means for us
 

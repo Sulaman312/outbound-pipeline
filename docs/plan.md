@@ -115,9 +115,13 @@ Anything that would call a paid API only shows what it would do, unless you add 
 5. **Before clearing finished leads from Instantly,** their outcome is saved in our database.
 6. **Every email has a postal address,** an unsubscribe line and the unsubscribe header.
    Opt-outs sync at least daily, to meet the 48-hour rule.
-7. **Secrets live only in `.env`.** `data/` and lead CSVs are never committed, because they hold
+7. **Each API client only calls the endpoints it's allowed to.** Every client has a fixed list of
+   paths and refuses anything else. This matters most for Apollo: the account only allows a
+   master key (it can do anything), so the code limits it to `mixed_companies/search` and
+   `mixed_people/api_search`.
+8. **Secrets live only in `.env`.** `data/` and lead CSVs are never committed, because they hold
    personal data.
-8. **Tests run offline.** HTTP is faked; no test needs a real key.
+9. **Tests run offline.** HTTP is faked; no test needs a real key.
 
 ## Code layout
 
