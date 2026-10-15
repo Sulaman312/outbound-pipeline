@@ -85,3 +85,25 @@ def test_progress_round_trip(conn: sqlite3.Connection) -> None:
         db.save_progress(conn, "s", "hash1", 3, 510, True)
     row = db.get_progress(conn, "s")
     assert (row["next_page"], row["total_entries"], row["exhausted"]) == (3, 510, 1)
+
+
+def test_upgrades_a_version_1_database_without_losing_data(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(db.SCHEMA)
+    old.execute("PRAGMA user_version = 1")
+    old.execute(
+        "INSERT INTO companies (domain, name, source, source_id, segment, created_at) "
+        "VALUES ('kept.com', 'Kept', 'apollo', 'o1', 's', '2026-10-15T00:00:00Z')"
+    )
+    old.commit()
+    old.close()
+
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert [row["domain"] for row in db.list_companies(conn)] == ["kept.com"]
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
+    assert "batch_id" in columns
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {"batches", "contacts"} <= tables
+    conn.close()

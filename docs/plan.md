@@ -2,8 +2,8 @@
 
 Read [research.md](research.md) first. Every number here comes from there.
 
-**Status:** steps 0 and 1 are built: the skeleton and Apollo company sourcing (see the README
-for how to run them). Everything after that is still design. The decisions at the bottom are open
+**Status:** steps 0–2 are built: the skeleton, Apollo company sourcing, and the Clay round
+trip, all usable from the web page (see the README). Everything after that is still design. The decisions at the bottom are open
 until Wania marks them DECIDED.
 
 ## Goal
@@ -74,8 +74,7 @@ These are **estimates** to plan with. Month 1 replaces them with real numbers.
 
 ## Data: one SQLite file, small tables
 
-Built so far: `companies`, `suppression`, `usage` and `sourcing_progress`. `contacts` and
-`batches` come with the Clay step.
+All built (schema version 2). Older databases upgrade automatically without losing data.
 
 SQLite is one file, needs no server, and is built into Python. It answers "have we seen this domain
 or email before?", which CSV files are bad at.
@@ -103,8 +102,9 @@ outbound suppress VALUE --reason TEXT          # add a domain or email to the do
 outbound fields [--segment S]                  # which fields the provider sent (names and counts only)  [built]
 outbound ui                                    # the same steps as a local web page (Streamlit)          [built]
 outbound source places --segment S             # only if D2 = yes
-outbound clay export --rows 50                 # writes data/clay/out/batch_007.csv (50 rows each)
-outbound clay import FILE --account LABEL      # reads Clay's export, creates contacts, applies rules
+outbound clay export [--rows 200]              # next companies to data/clay/batch_<time>_<segment>.csv   [built]
+outbound clay import FILE [--account A] [--credits N]  # reads Clay's export, creates contacts, applies rules [built]
+outbound export --contacts                     # the people Clay found, with their decision, to a CSV    [built]
 outbound verify                                # maybes → Instantly verifier (--live)
 outbound campaign apply campaigns/X.yaml       # create or update the Instantly campaign (--live)
 outbound push --campaign X                     # ready contacts → Instantly (--live)
@@ -153,14 +153,14 @@ outbound-pipeline/
     http.py               # the one HTTP sender: timeouts, retry on 429/5xx and failed connects
     normalize.py          # domains and emails in one normal form
     ui.py                 # the local web page (Streamlit); calls the step functions, no logic
-    rules.py              # send / drop / hold from statuses; pure functions, easy to test
+    rules.py              # ready / maybe / hold / drop from Clay's result; pure functions (built)
     clients/
       apollo.py           # Apollo calls → plain dicts
       places.py           # Google Places calls (only if D2)
       instantly.py        # verify, campaigns, leads, emails, blocklist
     steps/
-      source.py  export.py  suppress.py  fields.py   (built)
-      clay.py  verify.py  campaign.py  push.py  sync.py  report.py
+      source.py  export.py  suppress.py  fields.py  clay.py   (built)
+      verify.py  campaign.py  push.py  sync.py  report.py
   tests/                  # offline; fake HTTP; sample CSVs
 ```
 
@@ -179,7 +179,7 @@ yours.
 |---|---|---|---|
 | D1 | Which source for which offer? | (a) Apollo for both offers. (b) Apollo for front-end, Google Maps for AI automation at local businesses. (c) Both sources for both. | Month 1: (a) Apollo only. Add local businesses in month 2. |
 | D2 | Google Maps, given Google's ban on storing Places data | (a) Use the Places API and accept the risk. (b) Use Clay's own Google Maps source instead. (c) Skip Google Maps. | Decide in month 2. If yes, (b) keeps us off Google's terms, but it uses Clay rows. |
-| D3 | Clay: which plan, how many accounts | (a) Free only, about 75–150 a month. (b) Trials rotated: about 750–2,000 each, 50-row tables, terms risk. (c) Launch $185/mo. Also worth one test as email sources: Apollo Basic ($49), Instantly SuperSearch credits. | Month 1: one trial plus the free plan, with every batch recorded. Then compare real cost per lead and pick (b) or (c). |
+| D3 | Clay: which plan, how many accounts | (a) Free only, about 75–150 a month. (b) Trials rotated: about 750–2,000 each, 50-row tables, terms risk. (c) Launch $185/mo. Also worth one test as email sources: Apollo Basic ($49), Instantly SuperSearch credits. | **DECIDED (2026-10-15): Clay for emails**, through a CSV round trip with no Google Sheet in between (built). Still open: which plan or how many accounts. Record credits per batch on import; after a few batches the batches table shows the cost per ready email. |
 | D4 | Maybes and catch-alls | Instantly re-checks maybes. If still catch-all or unknown: (a) drop, (b) hold, (c) send a capped share. | Buy Nano credits ($9). Hold in month 1. Test a 10% share in month 2 if bounces stay under 1%. |
 | D5 | Role-based emails (`info@`, `contact@`) | (a) Drop. (b) Allow for local businesses only. (c) Allow. | (a) for Apollo leads, since we want a named person. Revisit with D2. |
 | D6 | Instantly plan, and clearing finished leads | (a) Growth; code saves outcomes, then deletes finished leads to free space. (b) Hypergrowth $97: no clearing, has webhooks. | (a) |
@@ -204,7 +204,7 @@ Each step starts only once the decisions it needs are made. All work goes straig
 |---|---|---|
 | 0 | **Built.** Skeleton: pyproject, config loading, SQLite schema, `check`, CI (ruff and pytest). No network. | nothing |
 | 1 | **Built.** Apollo company sourcing, plus `export` and `suppress`. First live test: 1 page = 1 credit. Segments and cap are starting values to edit. | D1, segments, cap |
-| 2 | Clay CSV export and import, batches, `docs/clay-table.md`. Built after you make the first Clay table, so we copy its real column names. | D3 |
+| 2 | **Built.** Clay CSV export and import, batches, contacts, rules, `docs/clay-table.md`, and the Clay and Contacts tabs. Clay's column names are detected, and can be picked in the UI. | D3 |
 | 3 | Rules and the Instantly verifier. First live test: 1 email. | D4, D5 |
 | 4 | Campaign from a file, and pushing leads. First live test: one campaign left as a draft. | D6–D9 |
 | 5 | Sync, suppression, clearing finished leads | D6, D11 |

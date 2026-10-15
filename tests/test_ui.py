@@ -35,6 +35,8 @@ def test_page_loads_with_overview(app) -> None:
         "Overview",
         "Find companies",
         "Companies",
+        "Clay",
+        "Contacts",
         "Do-not-contact",
     ]
     assert app.metric[0].value == "0 / 10"
@@ -123,3 +125,32 @@ def test_ui_command_without_streamlit(
     monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: None)
     assert cli.main(["--root", str(project), "ui"]) == 2
     assert 'pip install -e ".[ui]"' in capsys.readouterr().err
+
+
+def test_clay_round_trip_in_the_page(app, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APOLLO_API_KEY", "key")
+    monkeypatch.setattr(http, "new_client", FakeApollo((200, page([org(1), org(2)]))).client)
+    app.run()
+    app.checkbox(key="find_confirm").check().run()
+    app.button(key="find_run").click().run()
+
+    app.button(key="clay_export").click().run()
+    assert not app.exception
+    assert any("is ready. Upload it to a Clay table" in s.value for s in app.success)
+
+    clay_csv = (
+        b"Company Domain,First Name,Work Email,Validate Email\r\n"
+        b"company1.com,Jane,jane@company1.com,valid\r\n"
+        b"company2.com,Joe,info@company2.com,valid\r\n"
+    )
+    app.file_uploader(key="clay_upload").set_value(("people.csv", clay_csv, "text/csv")).run()
+    assert app.selectbox(key="map_email").value == "Work Email"
+    assert app.selectbox(key="map_domain").value == "Company Domain"
+    app.button(key="clay_import").click().run()
+
+    assert not app.exception
+    assert "ready      1" in app.code[-1].value
+    assert "hold       1" in app.code[-1].value
+    contacts = db.connect(project / "data" / "outbound.db")
+    assert sorted(row["decision"] for row in db.list_contacts(contacts)) == ["hold", "ready"]
+    contacts.close()

@@ -22,10 +22,12 @@ from outbound.config import (
     load_segments,
     load_settings,
 )
-from outbound.steps import export, source, suppress
+from outbound.steps import clay, export, source, suppress
 
 ROOT_ENV = "OUTBOUND_ROOT"  # set by `outbound ui`; the project folder
 ALL_SEGMENTS = "All segments"
+DECISIONS = ("ready", "maybe", "hold", "drop")
+NONE = "(none)"
 
 
 def _apollo_cap(settings: Settings) -> int | None:
@@ -39,13 +41,14 @@ def overview_tab(
     used = db.usage_this_month(conn, source.PROVIDER, source.UNIT)
     saved = db.count_companies(conn)
 
-    left, middle, right = st.columns(3)
-    left.metric(
+    credits, companies, ready, blocked = st.columns(4)
+    credits.metric(
         f"Apollo credits used ({db.current_month()})",
         f"{used} / {cap}" if cap is not None else f"{used} (no cap set)",
     )
-    middle.metric("Companies saved", sum(saved.values()))
-    right.metric("Do-not-contact entries", db.count_suppression(conn))
+    companies.metric("Companies saved", sum(saved.values()))
+    ready.metric("Contacts ready", db.count_contacts(conn).get("ready", 0))
+    blocked.metric("Do-not-contact entries", db.count_suppression(conn))
 
     for name, is_set in key_status().items():
         if not is_set:
@@ -155,6 +158,103 @@ def companies_tab(conn: sqlite3.Connection, segments: dict[str, Segment]) -> Non
     )
 
 
+def clay_tab(conn: sqlite3.Connection, settings: Settings, segments: dict[str, Segment]) -> None:
+    st.subheader("1. Send companies to Clay")
+    choice = st.selectbox("Segment", [ALL_SEGMENTS, *sorted(segments)], key="clay_segment")
+    segment = None if choice == ALL_SEGMENTS else choice
+    rows = int(
+        st.number_input(
+            "Companies per file (200 on Clay Free, 50 on a Clay trial)",
+            min_value=1,
+            max_value=1000,
+            value=clay.DEFAULT_ROWS,
+            key="clay_rows",
+        )
+    )
+    waiting = db.count_waiting_for_clay(conn, segment)
+    st.caption(f"{waiting} companies waiting for Clay. Each company is only ever sent once.")
+    if st.button("Create the Clay file", disabled=waiting == 0, key="clay_export"):
+        result = clay.export_batch(conn, settings.root, segment, rows)
+        st.session_state["clay_file"] = str(result.path) if result else None
+        st.rerun()
+    path = Path(st.session_state.get("clay_file") or "")
+    if path.is_file():
+        st.success(
+            f"{path.name} is ready. Upload it to a Clay table (steps in docs/clay-table.md)."
+        )
+        st.download_button(
+            "Download the Clay file",
+            data=path.read_bytes(),
+            file_name=path.name,
+            mime="text/csv",
+            key="clay_download",
+        )
+
+    st.subheader("2. Bring Clay's results back")
+    upload = st.file_uploader("The CSV you downloaded from Clay", type="csv", key="clay_upload")
+    if upload is not None:
+        headers, people = clay.read_csv(upload.getvalue().decode("utf-8-sig", errors="replace"))
+        detected = clay.detect_columns(headers)
+        st.caption(f"{len(people)} rows. Check which Clay column holds what:")
+        options = [NONE, *headers]
+        mapping: dict[str, str | None] = {}
+        columns = st.columns(2)
+        for i, (name, (label, _)) in enumerate(clay.FIELDS.items()):
+            found = detected.get(name)
+            pick = columns[i % 2].selectbox(
+                label, options, index=options.index(found) if found else 0, key=f"map_{name}"
+            )
+            mapping[name] = None if pick == NONE else pick
+        missing = clay.missing_fields(mapping)
+        if missing:
+            st.warning("Still needed: " + ", ".join(missing))
+        account = st.text_input("Which Clay account ran it (optional)", key="clay_account")
+        used_credits = st.number_input(
+            "Clay credits this batch used (optional)", min_value=0.0, value=0.0, key="clay_credits"
+        )
+        if st.button("Import", type="primary", disabled=bool(missing), key="clay_import"):
+            credits = used_credits or None
+            result = clay.import_rows(
+                conn, people, mapping, account=account.strip() or None, credits=credits
+            )
+            st.session_state["last_import"] = clay.describe_import(conn, result, credits)
+            st.rerun()
+    if "last_import" in st.session_state:
+        st.success("Import finished. Importing the same file again is safe: repeats are skipped.")
+        st.code(st.session_state["last_import"], language=None)
+
+    st.subheader("Batches")
+    batches = [
+        {key: row[key] for key in row.keys() if key != "file"} for row in db.list_batches(conn)
+    ]
+    st.dataframe(batches, hide_index=True, width="stretch")
+
+
+def contacts_tab(conn: sqlite3.Connection) -> None:
+    counts = db.count_contacts(conn)
+    for column, decision in zip(st.columns(4), DECISIONS, strict=True):
+        column.metric(decision, counts.get(decision, 0))
+    st.caption(
+        "ready: Clay says valid. maybe: re-checked with Instantly at the next step. "
+        "hold: waiting on a decision. drop: never sent."
+    )
+    choice = st.selectbox("Show", ["All", *DECISIONS], key="contacts_decision")
+    rows = export.contact_rows(conn, None if choice == "All" else choice)
+    st.dataframe(
+        rows,
+        hide_index=True,
+        width="stretch",
+        column_config={"linkedin_url": st.column_config.LinkColumn("LinkedIn")},
+    )
+    st.download_button(
+        "Download CSV",
+        data=export.csv_text(rows, export.CONTACT_COLUMNS).encode("utf-8-sig"),
+        file_name="contacts.csv",
+        mime="text/csv",
+        key="contacts_download",
+    )
+
+
 def do_not_contact_tab(conn: sqlite3.Connection) -> None:
     with st.form("suppress_form", clear_on_submit=True):
         value = st.text_input("Domain or email", placeholder="acme.com", key="suppress_value")
@@ -187,8 +287,8 @@ def main() -> None:
 
     conn = db.connect(settings.database)
     try:
-        overview, find, companies, do_not_contact = st.tabs(
-            ["Overview", "Find companies", "Companies", "Do-not-contact"]
+        overview, find, companies, clay_page, contacts, do_not_contact = st.tabs(
+            ["Overview", "Find companies", "Companies", "Clay", "Contacts", "Do-not-contact"]
         )
         with overview:
             overview_tab(conn, settings, segments)
@@ -196,6 +296,10 @@ def main() -> None:
             find_tab(conn, settings, segments)
         with companies:
             companies_tab(conn, segments)
+        with clay_page:
+            clay_tab(conn, settings, segments)
+        with contacts:
+            contacts_tab(conn)
         with do_not_contact:
             do_not_contact_tab(conn)
     finally:

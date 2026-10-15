@@ -3,7 +3,7 @@
 Cold email pipeline for Arsuno. It targets US companies with 1–20 employees, with two offers: AI
 automation, and outsourced front-end developers.
 
-**What works today: finding companies.**
+**What works today: finding companies, then finding the person and email through Clay.**
 - For each target group ("segment"), it asks Apollo for matching US companies.
 - Apollo applies the headcount and US filters itself.
 - It saves the usable ones and skips:
@@ -11,11 +11,20 @@ automation, and outsourced front-end developers.
   - companies on the do-not-contact list;
   - companies it already has.
 - It remembers where it stopped, and never goes over the monthly credit cap.
-- You can export everything to a CSV for Excel or Google Sheets.
+- It writes the next companies to a file for Clay, and never sends a company twice.
+- It reads Clay's results back, and sorts every person into one of four decisions:
+  - **ready**: Clay says valid;
+  - **maybe**: catch-all or unknown, re-checked with Instantly next;
+  - **hold**: info@-style addresses;
+  - **drop**: no email, invalid, or do-not-contact.
+- You can export companies or people to a CSV for Excel or Google Sheets.
 - You can do all of this from a **web page on your laptop** (`outbound ui`), or by typing
   commands.
 
-Next comes finding the right person and email at each company. See [docs/plan.md](docs/plan.md).
+Next comes re-checking the "maybe" emails and sending through Instantly. See
+[docs/plan.md](docs/plan.md).
+
+- [docs/clay-table.md](docs/clay-table.md) covers what to click in Clay for each batch.
 
 - [docs/how-it-works.md](docs/how-it-works.md) explains the code in plain words: what happens on
   each run, and what each file does.
@@ -130,6 +139,9 @@ holds (names and counts only).
 | `outbound source SEGMENT --live` | Fetches 1 page (100 companies) and saves the usable ones | 1 credit |
 | `outbound source SEGMENT --live --pages 5` | The same for 5 pages | up to 5 credits |
 | `outbound export` | All saved companies to a CSV (`--segment S` for one segment) | free |
+| `outbound export --contacts` | The people Clay found, with their decision, to a CSV | free |
+| `outbound clay export --rows 200` | The next 200 waiting companies to a file for Clay (50 on a trial) | free |
+| `outbound clay import FILE --credits 40` | Reads the CSV downloaded from Clay; `--credits` and `--account` are optional | free |
 | `outbound suppress acme.com --reason "client"` | Never contact this domain (or email). Can't be undone. | free |
 | `outbound fields` | Which fields Apollo sent, with counts. Names only, so it's safe to share. | free |
 | `outbound ui` | Opens the web page (needs the one-time UI install below) | free |
@@ -162,6 +174,13 @@ on your network can open it.
   - to fetch, tick "Spend up to N credits", then click Fetch. The box unticks itself after every
     run.
 - **Companies:** a searchable table with a Download CSV button.
+- **Clay:**
+  - make the file for Clay and download it;
+  - drop Clay's results back in, check which column is which, and import;
+  - see every batch with its numbers.
+
+  Click-by-click steps are in [docs/clay-table.md](docs/clay-table.md).
+- **Contacts:** the people Clay found, filtered by decision, with a Download CSV button.
 - **Do-not-contact:** add a domain or email, and see the list.
 
 ## Changing who you target
@@ -175,10 +194,11 @@ on your network can open it.
 
 ## Where your data is
 
-- **`data/outbound.db`** holds everything saved: companies, the do-not-contact list, credits
-  used and progress. It's never uploaded to GitHub. Back it up now and then by copying it
+- **`data/outbound.db`** holds everything saved: companies, contacts, Clay batches, the
+  do-not-contact list, credits used and progress. It's never uploaded to GitHub. Back it up now and then by copying it
   somewhere private; the do-not-contact list in it matters legally.
-- **`data/exports/`** holds the CSVs you export.
+- **`data/exports/`** holds the CSVs you export, and **`data/clay/`** holds the files made for
+  Clay. Both contain business contact data, so keep them private.
 
 ## For developers
 

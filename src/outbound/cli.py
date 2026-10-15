@@ -5,6 +5,9 @@ Commands:
   outbound source SEGMENT [--pages N]    dry run: shows the Apollo request and its cost
   outbound source SEGMENT --live         runs it for real (spends Apollo credits)
   outbound export [--segment S]          writes saved companies to a CSV file
+  outbound export --contacts             writes the people Clay found to a CSV file
+  outbound clay export [--rows N]        writes the next companies to a CSV to upload to Clay
+  outbound clay import FILE              reads the CSV you downloaded from Clay
   outbound suppress VALUE --reason TEXT  adds a domain or email to the do-not-contact list
   outbound fields [--segment S]          which fields Apollo sent (names and counts, no values)
   outbound ui                            opens the same steps as a web page on this computer
@@ -33,7 +36,7 @@ from outbound.config import (
     load_settings,
 )
 from outbound.http import new_client
-from outbound.steps import export, fields, source, suppress
+from outbound.steps import clay, export, fields, source, suppress
 
 MAX_PAGES_PER_RUN = 50
 UI_URL = "http://localhost:8501"
@@ -72,6 +75,12 @@ def cmd_check(
     width = max(len(key) for key in segments)
     for key in sorted(segments):
         print(f"  {key.ljust(width)}  {segments[key].offer.ljust(13)}  {saved.get(key, 0)} saved")
+    print(f"waiting for Clay: {db.count_waiting_for_clay(conn)} companies")
+    contacts = db.count_contacts(conn)
+    print(
+        "contacts: "
+        + ", ".join(f"{contacts.get(d, 0)} {d}" for d in ("ready", "maybe", "hold", "drop"))
+    )
     print(f"do-not-contact: {db.count_suppression(conn)} entries")
     return 0
 
@@ -131,9 +140,63 @@ def cmd_export(
     if args.segment and args.segment not in segments:
         print(f"error: no segment called {args.segment!r}", file=sys.stderr)
         return 2
-    path = Path(args.out).resolve() if args.out else export.default_path(settings.root)
-    count = export.export_companies(conn, path, args.segment)
-    print(f"wrote {count} companies to {_shown(path, settings.root)}")
+    kind = "contacts" if args.contacts else "companies"
+    path = Path(args.out).resolve() if args.out else export.default_path(settings.root, kind)
+    if args.contacts:
+        count = export.export_contacts(conn, path)
+    else:
+        count = export.export_companies(conn, path, args.segment)
+    print(f"wrote {count} {kind} to {_shown(path, settings.root)}")
+    return 0
+
+
+def cmd_clay_export(
+    args: argparse.Namespace,
+    settings: Settings,
+    segments: dict[str, Segment],
+    conn: sqlite3.Connection,
+) -> int:
+    if args.segment and args.segment not in segments:
+        print(f"error: no segment called {args.segment!r}", file=sys.stderr)
+        return 2
+    if args.rows < 1:
+        print("error: --rows must be at least 1", file=sys.stderr)
+        return 2
+    result = clay.export_batch(conn, settings.root, args.segment, args.rows)
+    if result is None:
+        print("Nothing waiting for Clay. Find more companies first (outbound source ...).")
+        return 0
+    print(
+        f"wrote {result.rows} companies to {_shown(result.path, settings.root)} (batch {result.batch_id})"
+    )
+    print("Next: upload it to a Clay table. The steps are in docs/clay-table.md.")
+    return 0
+
+
+def cmd_clay_import(
+    args: argparse.Namespace,
+    settings: Settings,
+    segments: dict[str, Segment],
+    conn: sqlite3.Connection,
+) -> int:
+    path = Path(args.file)
+    if not path.is_file():
+        print(f"error: no file at {path}", file=sys.stderr)
+        return 2
+    headers, rows = clay.read_csv(path.read_text(encoding="utf-8-sig", errors="replace"))
+    mapping = clay.detect_columns(headers)
+    missing = clay.missing_fields(mapping)
+    if missing:
+        print(f"error: can't tell which column is: {', '.join(missing)}", file=sys.stderr)
+        print(f"columns in the file: {', '.join(headers)}", file=sys.stderr)
+        print(
+            "Rename that column in Clay, or import through the web page (outbound ui), where you can pick it.",
+            file=sys.stderr,
+        )
+        return 2
+    print("columns used: " + ", ".join(f"{name}={col}" for name, col in mapping.items() if col))
+    result = clay.import_rows(conn, rows, mapping, account=args.account, credits=args.credits)
+    print(clay.describe_import(conn, result, args.credits))
     return 0
 
 
@@ -217,8 +280,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     exp = commands.add_parser("export", help="write saved companies to a CSV file")
     exp.add_argument("--segment", help="only this segment")
-    exp.add_argument("--out", help="file to write (default: data/exports/companies_<time>.csv)")
+    exp.add_argument("--contacts", action="store_true", help="the people Clay found, not companies")
+    exp.add_argument("--out", help="file to write (default: data/exports/<kind>_<time>.csv)")
     exp.set_defaults(func=cmd_export)
+
+    clay_cmd = commands.add_parser(
+        "clay", help="send companies to Clay, and read Clay's results back"
+    )
+    clay_steps = clay_cmd.add_subparsers(dest="clay_command", required=True)
+    clay_out = clay_steps.add_parser("export", help="write the next companies to a CSV for Clay")
+    clay_out.add_argument("--segment", help="only this segment")
+    clay_out.add_argument(
+        "--rows",
+        type=int,
+        default=clay.DEFAULT_ROWS,
+        help=f"companies per file (default {clay.DEFAULT_ROWS}, Clay Free's limit; use 50 on a trial)",
+    )
+    clay_out.set_defaults(func=cmd_clay_export)
+    clay_in = clay_steps.add_parser("import", help="read the CSV you downloaded from Clay")
+    clay_in.add_argument("file", help="the CSV file Clay gave you")
+    clay_in.add_argument("--account", help="which Clay login ran it, to compare accounts later")
+    clay_in.add_argument("--credits", type=float, help="Clay credits this batch used")
+    clay_in.set_defaults(func=cmd_clay_import)
 
     sup = commands.add_parser("suppress", help="add a domain or email to the do-not-contact list")
     sup.add_argument("value", help="a domain like acme.com, or an email")

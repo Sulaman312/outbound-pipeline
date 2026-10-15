@@ -11,8 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
+# Version 1: the tables every database starts with.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     id            INTEGER PRIMARY KEY,
@@ -58,6 +59,41 @@ CREATE TABLE IF NOT EXISTS sourcing_progress (
 );
 """
 
+# Each later version, as the SQL that upgrades the one before it. Never edit a released entry:
+# add a new one. Existing databases keep all their data.
+MIGRATIONS: dict[int, str] = {
+    2: """
+    CREATE TABLE IF NOT EXISTS batches (
+        id            INTEGER PRIMARY KEY,
+        file          TEXT NOT NULL,                -- the CSV written for Clay
+        rows          INTEGER NOT NULL,
+        segment       TEXT,                         -- NULL when the batch mixes segments
+        exported_at   TEXT NOT NULL,
+        imported_at   TEXT,                         -- when Clay's results came back
+        clay_account  TEXT,                         -- free text, e.g. which Clay login ran it
+        clay_credits  REAL                          -- credits Clay used, typed in by hand
+    );
+
+    ALTER TABLE companies ADD COLUMN batch_id INTEGER REFERENCES batches(id);
+
+    CREATE TABLE IF NOT EXISTS contacts (
+        id            INTEGER PRIMARY KEY,
+        company_id    INTEGER NOT NULL REFERENCES companies(id),
+        batch_id      INTEGER REFERENCES batches(id),
+        first_name    TEXT,
+        last_name     TEXT,
+        title         TEXT,
+        email         TEXT UNIQUE,                  -- normalized; NULL when Clay found none
+        linkedin_url  TEXT,
+        clay_status   TEXT NOT NULL,                -- valid | invalid | catch_all | unknown | none
+        decision      TEXT NOT NULL,                -- ready | maybe | hold | drop
+        reason        TEXT NOT NULL,
+        raw           TEXT,                         -- Clay's row as exported
+        created_at    TEXT NOT NULL
+    );
+    """,
+}
+
 COMPANY_COLUMNS = (
     "domain",
     "name",
@@ -85,15 +121,18 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create missing tables. Refuse a database made by newer code."""
+    """Create a new database, or upgrade an older one step by step. Refuse one from newer code."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError(
             f"database schema is version {version}, this code knows {SCHEMA_VERSION}. Update the code."
         )
-    conn.executescript(SCHEMA)
     if version == 0:
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.executescript(SCHEMA)
+        version = 1
+    for target in range(version + 1, SCHEMA_VERSION + 1):
+        conn.executescript(MIGRATIONS[target])
+        conn.execute(f"PRAGMA user_version = {target}")
     conn.commit()
 
 
@@ -229,3 +268,153 @@ def save_progress(
         """,
         (segment, filters_hash, next_page, total_entries, int(exhausted), now_utc()),
     )
+
+
+# --- Clay batches -------------------------------------------------------------------------------
+
+
+def _waiting_for_clay(segment: str | None) -> tuple[str, tuple[str, ...]]:
+    """WHERE clause for new companies not yet sent to Clay, minus do-not-contact domains."""
+    where = "status = 'new' AND domain NOT IN (SELECT value FROM suppression)"
+    if segment:
+        return where + " AND segment = ?", (segment,)
+    return where, ()
+
+
+def companies_for_clay(
+    conn: sqlite3.Connection, segment: str | None, limit: int
+) -> list[sqlite3.Row]:
+    """Up to `limit` companies waiting for Clay, oldest first."""
+    where, params = _waiting_for_clay(segment)
+    return conn.execute(
+        f"SELECT * FROM companies WHERE {where} ORDER BY id LIMIT ?", (*params, limit)
+    ).fetchall()
+
+
+def count_waiting_for_clay(conn: sqlite3.Connection, segment: str | None = None) -> int:
+    where, params = _waiting_for_clay(segment)
+    return conn.execute(f"SELECT COUNT(*) FROM companies WHERE {where}", params).fetchone()[0]
+
+
+def create_batch(conn: sqlite3.Connection, file: str, rows: int, segment: str | None) -> int:
+    cursor = conn.execute(
+        "INSERT INTO batches (file, rows, segment, exported_at) VALUES (?, ?, ?, ?)",
+        (file, rows, segment, now_utc()),
+    )
+    return int(cursor.lastrowid)
+
+
+def mark_exported(conn: sqlite3.Connection, company_ids: list[int], batch_id: int) -> None:
+    conn.executemany(
+        "UPDATE companies SET status = 'exported', batch_id = ? WHERE id = ?",
+        [(batch_id, company_id) for company_id in company_ids],
+    )
+
+
+def get_batch(conn: sqlite3.Connection, batch_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+
+
+def finish_batch(
+    conn: sqlite3.Connection, batch_id: int, account: str | None, credits: float | None
+) -> None:
+    """Record that Clay's results came back. Companies Clay returned nothing for become no_contact."""
+    conn.execute(
+        "UPDATE companies SET status = 'no_contact' WHERE batch_id = ? AND status = 'exported'",
+        (batch_id,),
+    )
+    conn.execute(
+        "UPDATE batches SET imported_at = ?, clay_account = COALESCE(?, clay_account), "
+        "clay_credits = COALESCE(?, clay_credits) WHERE id = ?",
+        (now_utc(), account, credits, batch_id),
+    )
+
+
+def list_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every batch with what came back: people, emails, and each decision."""
+    return conn.execute(
+        """
+        SELECT b.id, b.segment, b.rows, b.exported_at, b.imported_at, b.clay_account,
+               b.clay_credits, b.file,
+               COUNT(c.id) AS people,
+               COUNT(c.email) AS emails,
+               SUM(c.decision = 'ready') AS ready,
+               SUM(c.decision = 'maybe') AS maybe,
+               SUM(c.decision = 'hold') AS hold,
+               SUM(c.decision = 'drop') AS dropped
+        FROM batches b LEFT JOIN contacts c ON c.batch_id = b.id
+        GROUP BY b.id ORDER BY b.id DESC
+        """
+    ).fetchall()
+
+
+# --- contacts -----------------------------------------------------------------------------------
+
+
+CONTACT_COLUMNS = (
+    "company_id",
+    "batch_id",
+    "first_name",
+    "last_name",
+    "title",
+    "email",
+    "linkedin_url",
+    "clay_status",
+    "decision",
+    "reason",
+    "raw",
+)
+
+
+def get_company(conn: sqlite3.Connection, company_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+
+
+def find_company_by_domain(conn: sqlite3.Connection, domain: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM companies WHERE domain = ?", (domain,)).fetchone()
+
+
+def insert_contact(conn: sqlite3.Connection, contact: dict[str, Any]) -> bool:
+    """Save a person. Returns False if we already have that email."""
+    values = [contact.get(column) for column in CONTACT_COLUMNS] + [now_utc()]
+    cursor = conn.execute(
+        f"""
+        INSERT INTO contacts ({", ".join(CONTACT_COLUMNS)}, created_at)
+        VALUES ({", ".join("?" for _ in range(len(CONTACT_COLUMNS) + 1))})
+        ON CONFLICT DO NOTHING
+        """,
+        values,
+    )
+    return cursor.rowcount == 1
+
+
+def set_company_status(conn: sqlite3.Connection, company_id: int, status: str) -> None:
+    """enriched always wins; no_contact never overwrites enriched."""
+    if status == "enriched":
+        conn.execute("UPDATE companies SET status = 'enriched' WHERE id = ?", (company_id,))
+    else:
+        conn.execute(
+            "UPDATE companies SET status = ? WHERE id = ? AND status != 'enriched'",
+            (status, company_id),
+        )
+
+
+def list_contacts(conn: sqlite3.Connection, decision: str | None = None) -> list[sqlite3.Row]:
+    """People found by Clay, with their company, newest first."""
+    sql = """
+        SELECT c.email, c.first_name, c.last_name, c.title, co.domain AS company_domain,
+               co.name AS company_name, co.segment, c.decision, c.reason, c.clay_status,
+               c.linkedin_url, c.batch_id, c.created_at
+        FROM contacts c JOIN companies co ON co.id = c.company_id
+    """
+    params: tuple[str, ...] = ()
+    if decision:
+        sql += " WHERE c.decision = ?"
+        params = (decision,)
+    return conn.execute(sql + " ORDER BY c.id DESC", params).fetchall()
+
+
+def count_contacts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Number of contacts per decision."""
+    rows = conn.execute("SELECT decision, COUNT(*) AS n FROM contacts GROUP BY decision").fetchall()
+    return {row["decision"]: row["n"] for row in rows}

@@ -135,3 +135,63 @@ def test_fields_lists_names_never_values(
     assert any(line.split() == ["phone", "1"] for line in out.splitlines())
     assert any(line.split() == ["primary_domain", "2"] for line in out.splitlines())
     assert "555-0100-unique" not in out
+
+
+def fill(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Save company1.com to company3.com through a fake Apollo."""
+    monkeypatch.setattr(cli, "new_client", FakeApollo((200, page([org(1), org(2), org(3)]))).client)
+    monkeypatch.setenv("APOLLO_API_KEY", "key")
+    call(project, "source", "ai_accounting", "--live")
+    capsys.readouterr()
+
+
+def test_clay_round_trip(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fill(project, monkeypatch, capsys)
+    assert call(project, "clay", "export", "--rows", "2") == 0
+    out = capsys.readouterr().out
+    assert "wrote 2 companies to data/clay/batch_" in out and "(batch 1)" in out
+
+    clay_file = project / "from_clay.csv"
+    clay_file.write_text(
+        "Company Domain,First Name,Work Email,Validate Email\r\n"
+        "company1.com,Jane,jane@company1.com,valid\r\n"
+        "company2.com,Joe,joe@company2.com,catch-all\r\n",
+        encoding="utf-8",
+    )
+    assert call(project, "clay", "import", str(clay_file), "--credits", "3") == 0
+    out = capsys.readouterr().out
+    assert "columns used: domain=Company Domain" in out
+    assert "ready      1" in out and "maybe      1" in out
+
+    assert call(project, "check") == 0
+    out = capsys.readouterr().out
+    assert "waiting for Clay: 1 companies" in out
+    assert "contacts: 1 ready, 1 maybe, 0 hold, 0 drop" in out
+
+    target = project / "contacts.csv"
+    assert call(project, "export", "--contacts", "--out", str(target)) == 0
+    with target.open(encoding="utf-8-sig", newline="") as handle:
+        emails = sorted(row["email"] for row in csv.DictReader(handle))
+    assert emails == ["jane@company1.com", "joe@company2.com"]
+
+
+def test_clay_import_explains_missing_columns(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad = project / "bad.csv"
+    bad.write_text("Full Name,Notes\r\nJane,x\r\n", encoding="utf-8")
+    assert call(project, "clay", "import", str(bad)) == 2
+    err = capsys.readouterr().err
+    assert "can't tell which column is: Email" in err
+    assert "columns in the file: Full Name, Notes" in err
+
+
+def test_clay_export_with_nothing_waiting(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert call(project, "clay", "export") == 0
+    assert "Nothing waiting for Clay" in capsys.readouterr().out
