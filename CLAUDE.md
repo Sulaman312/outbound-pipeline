@@ -4,9 +4,8 @@ The project rules live in AGENTS.md so that Cursor and Claude Code follow the sa
 
 @AGENTS.md
 
-When reviewing a build step, check the diff against its `docs/steps/step-N-*.md` file:
+Before every push to `main`:
 
-- Nothing missing.
-- Nothing extra.
-- Tests offline.
-- Ruff clean.
+- Nothing beyond the step being built.
+- Tests are offline, and `ruff format . && ruff check . && pytest` all pass.
+- README and `docs/plan.md` match the code.

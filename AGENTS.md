@@ -12,14 +12,14 @@ Read before doing anything:
 - `docs/research.md`: facts about each tool, with sources.
 - `docs/plan.md`: the design, the build order, and the decisions table (D1–D13).
 
-## How build steps work
+## How work is done
 
-- Each step is specified in `docs/steps/step-N-*.md`. One task means one step file, and nothing
-  beyond it. Don't start the next step.
-- If the step file is unclear, or something needs a choice it doesn't make, stop and ask. Don't
-  pick.
-- Work on a branch named `build/step-N`. Never commit to `main`.
-- When finished, run the step's "Done when" checks and show the output.
+- Build in the order of "Build order" in `docs/plan.md`: one step at a time, and only once the
+  decisions it needs are made.
+- If something needs a choice the plan doesn't make, stop and ask. Don't pick.
+- Everything goes straight to `main`. No branches or pull requests (Wania's choice).
+- Before pushing, run `ruff format . && ruff check . && pytest`. All three must pass.
+- Keep `README.md` (how to run it) and `docs/plan.md` (what's built) in step with the code.
 
 ## Decisions
 
@@ -46,7 +46,7 @@ Read before doing anything:
 - Keep it basic:
   - Plain functions and small modules, each with a docstring at the top.
   - All SQL lives in `src/outbound/db.py`. Other modules call its functions and never write SQL.
-  - Standard library first. Add a dependency only when a step file says so.
+  - Standard library first. Add a dependency only when it clearly earns its place.
   - No base classes, registries, plugin systems or "manager" objects until a second real use
     exists.
 - Python 3.11+, type hints on every function.

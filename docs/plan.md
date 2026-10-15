@@ -2,8 +2,9 @@
 
 Read [research.md](research.md) first. Every number here comes from there.
 
-**Status:** design only. No code yet. The decisions at the bottom are open until Wania marks
-them DECIDED.
+**Status:** steps 0 and 1 are built: the skeleton and Apollo company sourcing (see the README
+for how to run them). Everything after that is still design. The decisions at the bottom are open
+until Wania marks them DECIDED.
 
 ## Goal
 
@@ -71,18 +72,22 @@ These are **estimates** to plan with. Month 1 replaces them with real numbers.
 | Instantly checks for maybes | about 300–500 = 75–125 credits | Nano credits ($9, 150 credits) ✔ |
 | Positive replies | about 7–30 per 1,000 people | reply-rate benchmarks |
 
-## Data: one SQLite file, five small tables
+## Data: one SQLite file, small tables
+
+Built so far: `companies`, `suppression`, `usage` and `sourcing_progress`. `contacts` and
+`batches` come with the Clay step.
 
 SQLite is one file, needs no server, and is built into Python. It answers "have we seen this domain
 or email before?", which CSV files are bad at.
 
 | Table | Key columns | Rule |
 |---|---|---|
-| `companies` | id, source, source_id, name, domain, city, state, employees, segment, raw, status, created_at | **Unique domain**: a company enters once, from whichever source finds it first. Status goes `new` → `exported` → `enriched` or `no_contact`. |
+| `companies` | id, source, source_id, name, domain, city, state, country, employees, industry, linkedin_url, segment, raw, status, created_at | **Unique domain**: a company enters once, from whichever source finds it first. Status goes `new` → `exported` → `enriched` or `no_contact`. |
 | `contacts` | id, company_id, first_name, last_name, title, email, clay_status, verify_status, decision, reason, campaign, instantly_lead_id, state, timestamps | **Unique email.** Decision is `send`, `drop` or `hold`. State goes `ready` → `pushed` → `finished`, `replied`, `bounced` or `unsubscribed`. |
 | `batches` | id, file, rows, clay_account, exported_at, imported_at, emails_found | One row per Clay CSV round trip. This gives the real cost per lead for each Clay account or plan. |
 | `suppression` | value, kind (email, domain or email_hash), reason, added_at | **Never deleted.** Checked before Clay and again before sending. If someone asks for their data to be deleted, we delete it and store only a one-way hash of their email here, so we never contact them again. |
-| `usage` | provider, month, units | Counts API spend so monthly caps are enforced (Google 1,000 requests, Apollo credits, Instantly credits) |
+| `usage` | provider, unit, month, amount | Counts API spend so monthly caps are enforced (Google 1,000 requests, Apollo credits, Instantly credits) |
+| `sourcing_progress` | segment, filters_hash, next_page, total_entries, exhausted | Remembers the next page per segment, so a rerun never pays for the same page twice. Changing a segment's filters starts it again at page 1. |
 
 `raw` stores the provider's original response, so a mapping mistake is fixed by re-reading the
 data instead of paying for it again. Google Places data is the exception: it's stored only if D2
@@ -91,8 +96,10 @@ allows it.
 ## Commands: one per step
 
 ```
-outbound check                                 # config valid? which keys set? usage vs caps this month
-outbound source apollo --segment S             # shows the query and credit cost; --live runs it
+outbound check                                 # config valid? which keys set? usage vs caps this month   [built]
+outbound source SEGMENT [--pages N]            # shows the Apollo query and credit cost; --live runs it    [built]
+outbound export [--segment S]                  # saved companies to a CSV for Excel or Sheets              [built]
+outbound suppress VALUE --reason TEXT          # add a domain or email to the do-not-contact list         [built]
 outbound source places --segment S             # only if D2 = yes
 outbound clay export --rows 50                 # writes data/clay/out/batch_007.csv (50 rows each)
 outbound clay import FILE --account LABEL      # reads Clay's export, creates contacts, applies rules
@@ -140,15 +147,17 @@ outbound-pipeline/
   src/outbound/
     cli.py                # commands only; no logic
     config.py             # load and check YAML and env
-    db.py                 # SQLite schema and small query helpers
-    http.py               # the one HTTP client: timeouts, retry on 429/5xx, dry-run guard, usage count
+    db.py                 # SQLite schema and every SQL statement
+    http.py               # the one HTTP sender: timeouts, retry on 429/5xx and failed connects
+    normalize.py          # domains and emails in one normal form
     rules.py              # send / drop / hold from statuses; pure functions, easy to test
     clients/
       apollo.py           # Apollo calls → plain dicts
       places.py           # Google Places calls (only if D2)
       instantly.py        # verify, campaigns, leads, emails, blocklist
     steps/
-      source.py  clay.py  verify.py  campaign.py  push.py  sync.py  report.py
+      source.py  export.py  suppress.py          (built)
+      clay.py  verify.py  campaign.py  push.py  sync.py  report.py
   tests/                  # offline; fake HTTP; sample CSVs
 ```
 
@@ -184,14 +193,13 @@ yours.
 Each step is small, tested, and usable on its own. Each one starts as a dry run, then gets one
 tiny live test, and only with your go-ahead.
 
-Each step gets its own instruction file in `docs/steps/`, written once the decisions it needs are
-made. A coding agent implements exactly one file per task. Ready so far:
-[step 0](steps/step-0-skeleton.md).
+Each step starts only once the decisions it needs are made. All work goes straight to `main`
+(Wania's choice: no branches).
 
 | Step | What | Needs |
 |---|---|---|
-| 0 | Skeleton: pyproject, config loading, SQLite schema, `check`, CI (ruff and pytest). No network. | nothing |
-| 1 | Apollo company sourcing. First live test: 1 page = 1 credit. | D1, segments, cap |
+| 0 | **Built.** Skeleton: pyproject, config loading, SQLite schema, `check`, CI (ruff and pytest). No network. | nothing |
+| 1 | **Built.** Apollo company sourcing, plus `export` and `suppress`. First live test: 1 page = 1 credit. Segments and cap are starting values to edit. | D1, segments, cap |
 | 2 | Clay CSV export and import, batches, `docs/clay-table.md`. Built after you make the first Clay table, so we copy its real column names. | D3 |
 | 3 | Rules and the Instantly verifier. First live test: 1 email. | D4, D5 |
 | 4 | Campaign from a file, and pushing leads. First live test: one campaign left as a draft. | D6–D9 |
@@ -201,11 +209,10 @@ made. A coding agent implements exactly one file per task. Ready so far:
 
 ## What was binned
 
-The earlier setup was removed from this branch:
+The earlier setup was removed:
 
 - The code in `src/` and its tests.
 - `config/`: 3 target profiles, plus AU and UK compliance rules.
 - `ARCHITECTURE.md`, the CI workflow and `pyproject.toml`.
 
-`.gitignore` was kept. Everything removed is still in git history: commit `532f68b`, also on
-`main`.
+`.gitignore` was kept. Everything removed is still in git history at commit `532f68b`.
