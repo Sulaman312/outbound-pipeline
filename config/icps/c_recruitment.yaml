@@ -1,0 +1,17 @@
+# ICP C (Section 1 playbook, draft): recruitment agencies, AI screening.
+id: C
+name: Recruitment agencies
+offer: AI candidate sourcing and screening
+countries: [US, UK, AU]
+
+disqualify:
+  min_employees: 2               # playbook: no solo recruiters
+  max_employees: 50
+
+sources:
+  apollo:
+    person_titles: [Founder, Managing Director, Director, Head of Delivery, Head of Operations]
+    person_seniorities: [owner, founder, c_suite, partner, head, director]
+    organization_num_employees_ranges: ["2,10", "11,50"]
+    organization_industries: [staffing & recruiting]
+    max_pages: 2

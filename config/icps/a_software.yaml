@@ -1,0 +1,20 @@
+# ICP A (Section 1 playbook, draft): small software companies, developer outsourcing.
+id: A
+name: Small software companies
+offer: Full-stack developer outsourcing
+countries: [US, UK, AU]
+
+disqualify:
+  max_employees: 10            # playbook says 1-10; senior said 1-20, so widen here if needed
+  name_keywords: [outsourcing, staffing, recruitment]   # agencies that sell outsourcing themselves
+  domains: []
+
+sources:
+  apollo:
+    person_titles: [Founder, Co-Founder, CEO, CTO, Technical Co-Founder]
+    person_seniorities: [owner, founder, c_suite]
+    organization_num_employees_ranges: ["1,10"]
+    # Must match Apollo's lowercase industry names exactly; confirm in the Apollo UI.
+    organization_industries: [computer software, information technology & services, internet]
+    per_page: 100
+    max_pages: 2

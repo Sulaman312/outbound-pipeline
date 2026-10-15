@@ -1,0 +1,22 @@
+# Paths are relative to the pipeline folder. No secrets here: each provider
+# names the environment variable that holds its key.
+database: data/outbound.db
+exports_dir: data/exports
+
+http:
+  timeout_seconds: 30
+  max_retries: 4
+  backoff_seconds: 2
+
+providers:
+  apollo:
+    api_key_env: APOLLO_API_KEY
+    base_url: https://api.apollo.io
+    monthly_request_cap: null          # People API Search costs 0 credits
+    min_seconds_between_requests: 1.0  # rate limit not published; be polite
+  google_places:
+    api_key_env: GOOGLE_PLACES_API_KEY
+    base_url: https://places.googleapis.com
+    # Text Search Enterprise SKU: 1,000 free requests/month, then $35 per 1,000.
+    # The pipeline refuses request 1,001. Raise only with a go-ahead to pay.
+    monthly_request_cap: 1000

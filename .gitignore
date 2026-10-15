@@ -1,0 +1,35 @@
+# Secrets: never commit keys. Only .env.example (empty values) is tracked.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials*.json
+service-account*.json
+
+# Pipeline data: SQLite DB, exports, raw provider payloads (contain personal data)
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
