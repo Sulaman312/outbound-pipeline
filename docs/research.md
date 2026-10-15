@@ -130,10 +130,17 @@ recorded here.
 - **First live run (2026-10-15):**
   - The `ai_accounting` segment found about 82,300 matching companies. Of the first 100, 96 had
     a website.
-  - Organization Search left our employee, country, city and industry columns empty for all
-    100. Either it doesn't return those fields or it names them differently. `outbound fields`
-    lists what it did send.
-  - Until that's known, the "not US" and "over 20 staff" checks can't fire, and we rely on
+  - Organization Search **doesn't return headcount, location or industry.** `outbound fields`
+    on the 96 saved records showed what it does send:
+    - `id`, `name`, `primary_domain`, `website_url`;
+    - `linkedin_url` and `linkedin_uid`;
+    - `phone` (81), `founded_year` (84);
+    - `naics_codes` (92) and `sic_codes` (90);
+    - headcount *growth* rates, but not the headcount;
+    - `organization_revenue`, with a readable value in only 15;
+    - social links, and `owned_by_organization` (3).
+    - It does **not** send `estimated_num_employees`, `city`, `state`, `country` or `industry`.
+  - So the "not US" and "over 20 staff" checks can't run at sourcing, and we rely on
     Apollo's own filters. Person enrichment returns full company details (seen in the
     teammate's data), so those checks can run at the email step at no extra cost.
   - About 1 in 10 results were off-target, matching the keyword "accounting" without being

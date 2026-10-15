@@ -101,6 +101,7 @@ outbound source SEGMENT [--pages N]            # shows the Apollo query and cred
 outbound export [--segment S]                  # saved companies to a CSV for Excel or Sheets              [built]
 outbound suppress VALUE --reason TEXT          # add a domain or email to the do-not-contact list         [built]
 outbound fields [--segment S]                  # which fields the provider sent (names and counts only)  [built]
+outbound ui                                    # the same steps as a local web page (Streamlit)          [built]
 outbound source places --segment S             # only if D2 = yes
 outbound clay export --rows 50                 # writes data/clay/out/batch_007.csv (50 rows each)
 outbound clay import FILE --account LABEL      # reads Clay's export, creates contacts, applies rules
@@ -151,13 +152,14 @@ outbound-pipeline/
     db.py                 # SQLite schema and every SQL statement
     http.py               # the one HTTP sender: timeouts, retry on 429/5xx and failed connects
     normalize.py          # domains and emails in one normal form
+    ui.py                 # the local web page (Streamlit); calls the step functions, no logic
     rules.py              # send / drop / hold from statuses; pure functions, easy to test
     clients/
       apollo.py           # Apollo calls → plain dicts
       places.py           # Google Places calls (only if D2)
       instantly.py        # verify, campaigns, leads, emails, blocklist
     steps/
-      source.py  export.py  suppress.py          (built)
+      source.py  export.py  suppress.py  fields.py   (built)
       clay.py  verify.py  campaign.py  push.py  sync.py  report.py
   tests/                  # offline; fake HTTP; sample CSVs
 ```
@@ -188,7 +190,7 @@ yours.
 | D11 | Re-contact | Contact a person once ever? Once per offer? Again after N months? | Once per offer. Never again after a reply, unsubscribe or bounce. |
 | D12 | Where the database lives | (a) SQLite file on the machine that runs the pipeline: zero setup, $0, offline tests, needs our own daily backup. (b) Supabase (hosted Postgres): shared and has a web table view. Free tier pauses after 1 week idle, has no backups, 500 MB. Pro is $25/mo with daily backups. Adds an account, a connection secret and a Postgres driver. | (a) while one person runs the commands. Switch to (b) when several people run it from different machines, someone needs a web view of the leads, or it moves to a server on a schedule. All SQL stays in `db.py`, so the switch touches one file. |
 | D13 | AI-written first line per email | (a) No, same template for all. (b) Yes: an AI model writes one line from the company data, and a person approves it. The teammate's prototype did this with Claude. | Snooze until sending works end to end. Then test it as a variant against the plain template. |
-| D14 | A screen (UI) instead of typed commands | (a) Keep typed commands, and view data in Excel or the free "DB Browser for SQLite" app. (b) A small local web page (Streamlit) on your laptop: credits used, pick a segment, buttons for "preview (free)" and "fetch 1 page", a searchable companies table, CSV download, and a do-not-contact box. One file calling the same functions. Adds one dependency. | (b) once the person and email step exists, so the screen covers the whole flow. A first version for sourcing is quick if wanted now. |
+| D14 | A screen (UI) instead of typed commands | (a) typed commands only (b) a small local web page (Streamlit) | **DECIDED (2026-10-15): (b).** First version built for sourcing (`outbound ui`): overview, find companies, companies table + CSV, do-not-contact. Each new step adds its tab. Runs on localhost only. |
 
 ## Build order
 

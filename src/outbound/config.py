@@ -39,11 +39,6 @@ class Segment:
     locations: tuple[str, ...]  # company HQ locations
     keywords: tuple[str, ...]  # Apollo company keyword tags
 
-    @property
-    def max_employees(self) -> int:
-        """The largest headcount any of this segment's ranges allows."""
-        return max(int(r.split(",")[1]) for r in self.employees)
-
 
 def _read_yaml(root: Path, name: str) -> dict[str, Any]:
     path = root / "config" / name

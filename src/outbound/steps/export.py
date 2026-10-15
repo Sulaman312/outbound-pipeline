@@ -6,26 +6,15 @@ This only reads. It doesn't change any company's status, and it leaves out do-no
 from __future__ import annotations
 
 import csv
+import io
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from outbound import db
 
-COLUMNS = (
-    "domain",
-    "name",
-    "segment",
-    "city",
-    "state",
-    "country",
-    "employees",
-    "industry",
-    "linkedin_url",
-    "status",
-    "source",
-    "created_at",
-)
+# Headcount, location and industry columns come back once the email step fills them.
+COLUMNS = ("domain", "name", "segment", "linkedin_url", "status", "source", "created_at")
 
 
 def default_path(root: Path) -> Path:
@@ -33,14 +22,26 @@ def default_path(root: Path) -> Path:
     return root / "data" / "exports" / f"companies_{stamp}.csv"
 
 
+def company_rows(conn: sqlite3.Connection, segment: str | None = None) -> list[dict[str, object]]:
+    """Saved companies as plain rows with the export columns, for the CSV and the UI table."""
+    return [
+        {column: "" if row[column] is None else row[column] for column in COLUMNS}
+        for row in db.list_companies(conn, segment)
+    ]
+
+
+def csv_text(rows: list[dict[str, object]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=COLUMNS, lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
 def export_companies(conn: sqlite3.Connection, path: Path, segment: str | None = None) -> int:
     """Write the CSV and return how many companies it holds."""
-    rows = db.list_companies(conn, segment)
+    rows = company_rows(conn, segment)
     path.parent.mkdir(parents=True, exist_ok=True)
     # utf-8-sig so Excel on Windows shows accented names correctly
-    with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(COLUMNS)
-        for row in rows:
-            writer.writerow(["" if row[column] is None else row[column] for column in COLUMNS])
+    path.write_text(csv_text(rows), encoding="utf-8-sig", newline="")
     return len(rows)

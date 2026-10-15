@@ -189,6 +189,13 @@ def add_suppression(conn: sqlite3.Connection, value: str, kind: str, reason: str
     return cursor.rowcount == 1
 
 
+def list_suppression(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """The do-not-contact list, newest first."""
+    return conn.execute(
+        "SELECT value, kind, reason, added_at FROM suppression ORDER BY added_at DESC, value"
+    ).fetchall()
+
+
 def count_suppression(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM suppression").fetchone()[0]
 

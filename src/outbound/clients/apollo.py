@@ -113,18 +113,12 @@ def pagination(data: dict[str, Any]) -> tuple[int | None, int | None]:
     return (total if isinstance(total, int) else None, pages if isinstance(pages, int) else None)
 
 
-def _whole_number(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value)
-    return None
-
-
 def to_company(record: dict[str, Any]) -> dict[str, Any]:
-    """Map one Apollo record to our company fields. The domain isn't normalized yet."""
+    """Map one Apollo record to our company fields. The domain isn't normalized yet.
+
+    Organization Search sends no headcount, location or industry (checked on real data,
+    2026-10-15), so those columns stay empty until the email step fills them.
+    """
     return {
         "source": "apollo",
         # saved accounts carry the organization id separately from their own id
@@ -133,10 +127,5 @@ def to_company(record: dict[str, Any]) -> dict[str, Any]:
         "website": record.get("primary_domain")
         or record.get("domain")
         or record.get("website_url"),
-        "city": record.get("city"),
-        "state": record.get("state"),
-        "country": record.get("country"),
-        "employees": _whole_number(record.get("estimated_num_employees")),
-        "industry": record.get("industry"),
         "linkedin_url": record.get("linkedin_url"),
     }

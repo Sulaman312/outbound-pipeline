@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -21,8 +21,6 @@ from outbound.config import Segment
 from outbound.normalize import normalize_domain
 
 PROVIDER, UNIT = "apollo", "credits"
-US_NAMES = frozenset({"united states", "united states of america", "usa", "us"})
-CHECKED_FIELDS = ("domain", "employees", "country", "city")
 
 
 @dataclass
@@ -33,10 +31,7 @@ class SourceResult:
     saved: int = 0
     duplicate: int = 0
     no_domain: int = 0
-    not_us: int = 0
-    too_big: int = 0
     suppressed: int = 0
-    filled: dict[str, int] = field(default_factory=lambda: dict.fromkeys(CHECKED_FIELDS, 0))
     total_entries: int | None = None
     next_page: int = 1
     exhausted: bool = False
@@ -61,26 +56,17 @@ def start_point(conn: sqlite3.Connection, segment: Segment) -> tuple[int, bool, 
 def _save(
     conn: sqlite3.Connection, segment: Segment, record: dict[str, Any], result: SourceResult
 ) -> None:
-    """Check one Apollo record and save it if it's usable. Updates the counts in result."""
+    """Check one Apollo record and save it if it's usable. Updates the counts in result.
+
+    Apollo's company search sends no headcount or location, so it can't check "US only" or
+    "1-20 staff" here. Apollo applies those filters itself. Person enrichment, at the email
+    step, returns full company details, and the check runs again there.
+    """
     company = apollo.to_company(record)
     domain = normalize_domain(company.pop("website"))
     result.seen += 1
-    for name, value in (
-        ("domain", domain),
-        ("employees", company["employees"]),
-        ("country", company["country"]),
-        ("city", company["city"]),
-    ):
-        if value not in (None, ""):
-            result.filled[name] += 1
-
-    country = (company["country"] or "").strip().lower()
     if not domain:
         result.no_domain += 1
-    elif country and country not in US_NAMES:
-        result.not_us += 1
-    elif company["employees"] is not None and company["employees"] > segment.max_employees:
-        result.too_big += 1
     elif db.is_suppressed(conn, domain):
         result.suppressed += 1
     else:
@@ -159,13 +145,11 @@ def describe(
     cap: int | None,
     per_page: int = apollo.MAX_PER_PAGE,
 ) -> str:
-    """What a live run would do, for the dry run. Reads only the local database."""
+    """What a live run would do (the preview). Reads only the local database."""
     page, exhausted, total = start_point(conn, segment)
     used = db.usage_this_month(conn, PROVIDER, UNIT)
     cost = pages * apollo.CREDITS_PER_PAGE
     lines = [
-        "DRY RUN: nothing is sent to Apollo. Add --live to run it for real.",
-        "",
         f"segment:  {segment.key} ({segment.offer})",
         f"          {segment.description}",
         f"request:  POST {apollo.BASE_URL}{apollo.ORG_SEARCH_PATH}",
@@ -192,7 +176,7 @@ def describe(
     return "\n".join(lines)
 
 
-def summarize(result: SourceResult, segment: Segment, *, used: int, cap: int) -> str:
+def summarize(result: SourceResult, *, used: int, cap: int) -> str:
     """The report printed after a live run."""
     if result.pages == 0 and result.exhausted:
         return "No more pages for this segment. Change its filters in config/segments.yaml to search again."
@@ -202,13 +186,8 @@ def summarize(result: SourceResult, segment: Segment, *, used: int, cap: int) ->
         f"  saved (new)          {result.saved}",
         f"  already saved        {result.duplicate}",
         f"  no website           {result.no_domain}",
-        f"  not US               {result.not_us}",
-        f"  over {segment.max_employees} staff        {result.too_big}",
         f"  do-not-contact       {result.suppressed}",
     ]
-    if result.seen:
-        filled = ", ".join(f"{name} {result.filled[name]}/{result.seen}" for name in CHECKED_FIELDS)
-        lines.append(f"  fields filled: {filled}")
     if result.total_entries is not None:
         lines.append(f"Apollo reports about {result.total_entries:,} matching companies.")
     if result.error:

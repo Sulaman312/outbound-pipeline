@@ -5,14 +5,15 @@ automation, and outsourced front-end developers.
 
 **What works today: finding companies.**
 - For each target group ("segment"), it asks Apollo for matching US companies.
+- Apollo applies the headcount and US filters itself.
 - It saves the usable ones and skips:
   - companies with no website;
-  - companies not based in the US;
-  - companies with too many staff;
   - companies on the do-not-contact list;
   - companies it already has.
 - It remembers where it stopped, and never goes over the monthly credit cap.
 - You can export everything to a CSV for Excel or Google Sheets.
+- You can do all of this from a **web page on your laptop** (`outbound ui`), or by typing
+  commands.
 
 Next comes finding the right person and email at each company. See [docs/plan.md](docs/plan.md).
 
@@ -95,10 +96,7 @@ The first test spends **1 Apollo credit** in total. Windows commands are shown.
      saved (new)          83
      already saved        0
      no website           9
-     not US               0
-     over 20 staff        5
      do-not-contact       3
-     fields filled: domain 91/100, employees 87/100, country 100/100, city 95/100
    Apollo reports about 1,234 matching companies.
    Next run continues at page 2.
    ```
@@ -118,9 +116,8 @@ The first test spends **1 Apollo credit** in total. Windows commands are shown.
    ```
    Export again, and that company is gone from the CSV.
 
-**Send Claude** the summary from step 3, especially the `fields filled` line. If any field is
-0 out of 100, Apollo uses a different field name than expected, and it'll be fixed without
-spending more credits. Apollo's original data for every company is saved too.
+Apollo's original data for every company is saved too. `outbound fields` lists which fields it
+holds (names and counts only).
 
 ---
 
@@ -135,9 +132,37 @@ spending more credits. Apollo's original data for every company is saved too.
 | `outbound export` | All saved companies to a CSV (`--segment S` for one segment) | free |
 | `outbound suppress acme.com --reason "client"` | Never contact this domain (or email). Can't be undone. | free |
 | `outbound fields` | Which fields Apollo sent, with counts. Names only, so it's safe to share. | free |
+| `outbound ui` | Opens the web page (needs the one-time UI install below) | free |
 
 On Windows, put `.venv\Scripts\` in front of each command, for example
 `.venv\Scripts\outbound check`.
+
+## The web page (UI)
+
+The same steps with buttons and tables, in your browser. It runs on your laptop only; nobody else
+on your network can open it.
+
+1. **One-time install:**
+   ```powershell
+   .venv\Scripts\pip install -e ".[ui]"
+   ```
+2. **Start it:**
+   ```powershell
+   .venv\Scripts\outbound ui
+   ```
+   Your browser opens `http://localhost:8501`. Keep the terminal window open while you use it,
+   and press `Ctrl+C` there to stop it.
+
+**What's on it:**
+- **Overview:** credits used against the cap, companies saved per segment, and the do-not-contact
+  count.
+- **Find companies:**
+  - pick a segment and the number of pages;
+  - the preview (free) shows exactly what would be sent to Apollo;
+  - to fetch, tick "Spend up to N credits", then click Fetch. The box unticks itself after every
+    run.
+- **Companies:** a searchable table with a Download CSV button.
+- **Do-not-contact:** add a domain or email, and see the list.
 
 ## Changing who you target
 

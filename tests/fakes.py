@@ -9,18 +9,21 @@ import httpx
 
 
 def org(number: int, domain: str | None = None, **fields: Any) -> dict[str, Any]:
-    """One Apollo organization record, the way Organization Search returns it."""
+    """One Apollo organization record, shaped like real Organization Search output (2026-10-15).
+
+    It has no headcount, location or industry, because Organization Search doesn't send them.
+    """
     record: dict[str, Any] = {
         "id": f"org{number}",
         "name": f"Company {number}",
         "primary_domain": domain if domain is not None else f"company{number}.com",
         "website_url": f"http://www.company{number}.com",
-        "city": "Austin",
-        "state": "Texas",
-        "country": "United States",
-        "estimated_num_employees": 8,
-        "industry": "accounting",
         "linkedin_url": f"http://www.linkedin.com/company/company{number}",
+        "linkedin_uid": str(1000 + number),
+        "phone": "+1 512-555-0100",
+        "founded_year": 2015,
+        "naics_codes": ["54121"],
+        "organization_headcount_twelve_month_growth": 0.1,
     }
     record.update(fields)
     return record

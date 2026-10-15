@@ -81,12 +81,15 @@ def test_companies_in_reads_both_lists() -> None:
     assert apollo.to_company(found[1])["website"] == "nine.com"
 
 
-def test_to_company_maps_fields() -> None:
-    company = apollo.to_company(org(1, estimated_num_employees="12"))
-    assert company["source_id"] == "org1"
-    assert company["website"] == "company1.com"
-    assert company["employees"] == 12
-    assert company["country"] == "United States"
+def test_to_company_maps_only_fields_apollo_sends() -> None:
+    company = apollo.to_company(org(1))
+    assert company == {
+        "source": "apollo",
+        "source_id": "org1",
+        "name": "Company 1",
+        "website": "company1.com",
+        "linkedin_url": "http://www.linkedin.com/company/company1",
+    }
 
 
 def test_pagination() -> None:

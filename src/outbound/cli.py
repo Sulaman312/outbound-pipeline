@@ -7,14 +7,19 @@ Commands:
   outbound export [--segment S]          writes saved companies to a CSV file
   outbound suppress VALUE --reason TEXT  adds a domain or email to the do-not-contact list
   outbound fields [--segment S]          which fields Apollo sent (names and counts, no values)
+  outbound ui                            opens the same steps as a web page on this computer
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import sqlite3
+import subprocess
 import sys
+import time
+import webbrowser
 from pathlib import Path
 
 from outbound import db
@@ -31,6 +36,7 @@ from outbound.http import new_client
 from outbound.steps import export, fields, source, suppress
 
 MAX_PAGES_PER_RUN = 50
+UI_URL = "http://localhost:8501"
 
 
 def _shown(path: Path, root: Path) -> str:
@@ -89,6 +95,7 @@ def cmd_source(
     cap = _apollo_cap(settings)
 
     if not args.live:
+        print("DRY RUN: nothing is sent to Apollo. Add --live to run it for real.\n")
         print(source.describe(conn, segment, pages=args.pages, cap=cap))
         return 0
 
@@ -111,7 +118,7 @@ def cmd_source(
             conn, segment, client=client, api_key=api_key, cap=cap, pages=args.pages
         )
     used = db.usage_this_month(conn, source.PROVIDER, source.UNIT)
-    print(source.summarize(result, segment, used=used, cap=cap))
+    print(source.summarize(result, used=used, cap=cap))
     return 1 if result.error else 0
 
 
@@ -156,6 +163,42 @@ def cmd_fields(
     return 0
 
 
+def cmd_ui(
+    args: argparse.Namespace,
+    settings: Settings,
+    segments: dict[str, Segment],
+    conn: sqlite3.Connection,
+) -> int:
+    if importlib.util.find_spec("streamlit") is None:
+        print(
+            'error: the UI isn\'t installed yet. Run:  .venv\\Scripts\\pip install -e ".[ui]"',
+            file=sys.stderr,
+        )
+        return 2
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(Path(__file__).with_name("ui.py")),
+        "--server.address=localhost",  # only this computer can open it
+        "--server.port=8501",
+        "--server.headless=true",  # no first-run email prompt; we open the browser ourselves
+        "--browser.gatherUsageStats=false",
+        "--client.toolbarMode=viewer",  # hides Streamlit's "Deploy" button
+    ]
+    env = {**os.environ, "OUTBOUND_ROOT": str(settings.root)}
+    print(f"Starting the UI at {UI_URL}. Keep this window open; press Ctrl+C here to stop it.")
+    process = subprocess.Popen(command, env=env)
+    time.sleep(2)
+    webbrowser.open(UI_URL)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="outbound", description="Arsuno outbound pipeline")
     parser.add_argument("--root", default=".", help="project folder (default: the current folder)")
@@ -185,6 +228,9 @@ def build_parser() -> argparse.ArgumentParser:
     fld = commands.add_parser("fields", help="which fields Apollo sent (names and counts only)")
     fld.add_argument("--segment", help="only this segment")
     fld.set_defaults(func=cmd_fields)
+
+    ui = commands.add_parser("ui", help="open the web page (runs on this computer only)")
+    ui.set_defaults(func=cmd_ui)
     return parser
 
 

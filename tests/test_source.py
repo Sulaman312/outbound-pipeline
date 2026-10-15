@@ -34,7 +34,7 @@ def run(
 
 def test_dry_run_describes_without_network(conn: sqlite3.Connection, segment: Segment) -> None:
     text = source.describe(conn, segment, pages=2, cap=10)
-    assert "DRY RUN" in text
+    assert "request:  POST https://api.apollo.io/api/v1/mixed_companies/search" in text
     assert "q_organization_keyword_tags[] = accounting" in text
     assert "pages:    1 to 2" in text
     assert "up to 2 Apollo credit(s)" in text
@@ -51,29 +51,26 @@ def test_live_run_filters_and_saves(conn: sqlite3.Connection, segment: Segment) 
     records = [
         org(1, "https://www.Good-One.com/"),
         org(2, "", website_url=None),  # no website at all
-        org(4, country="India"),
-        org(5, estimated_num_employees=45),
-        org(6, "blocked.com"),
-        org(7, "good-one.com"),  # same company again under another id
-        org(8, estimated_num_employees=None, country=None),  # unknown size and country: kept
+        org(3, "blocked.com"),
+        org(4, "good-one.com"),  # same company again under another id
+        org(5),
     ]
     fake = FakeApollo((200, page(records)))
     result = run(conn, segment, fake)
 
-    assert (result.saved, result.duplicate, result.no_domain) == (2, 1, 1)
-    assert (result.not_us, result.too_big, result.suppressed) == (1, 1, 1)
-    assert result.seen == 7 and result.pages == 1 and result.credits == 1
+    assert (result.saved, result.duplicate, result.no_domain, result.suppressed) == (2, 1, 1, 1)
+    assert result.seen == 5 and result.pages == 1 and result.credits == 1
     assert db.usage_this_month(conn, "apollo", "credits") == 1
 
     rows = {row["domain"]: row for row in db.list_companies(conn)}
-    assert sorted(rows) == ["company8.com", "good-one.com"]
+    assert sorted(rows) == ["company5.com", "good-one.com"]
     saved = rows["good-one.com"]
-    assert (saved["segment"], saved["source"], saved["source_id"], saved["employees"]) == (
+    assert (saved["segment"], saved["source"], saved["source_id"]) == (
         "ai_accounting",
         "apollo",
         "org1",
-        8,
     )
+    assert saved["linkedin_url"] == "http://www.linkedin.com/company/company1"
     assert json.loads(saved["raw"])["id"] == "org1"
 
 
@@ -138,9 +135,8 @@ def test_error_keeps_earlier_pages(conn: sqlite3.Connection, segment: Segment) -
 
 def test_summary_text(conn: sqlite3.Connection, segment: Segment) -> None:
     result = run(conn, segment, FakeApollo((200, page([org(1), org(2, "", website_url=None)]))))
-    text = source.summarize(result, segment, used=1, cap=10)
+    text = source.summarize(result, used=1, cap=10)
     assert "saved (new)          1" in text
     assert "no website           1" in text
-    assert "fields filled: domain 1/2" in text
     assert "about 500 matching companies" in text
     assert "Next run continues at page 2." in text

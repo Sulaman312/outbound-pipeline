@@ -27,8 +27,10 @@ file. Then you can export them to a CSV.
 6. **For each company Apollo sends back,** `source.py`:
    - turns the website into a clean domain (`https://www.Acme.com/about` becomes `acme.com`),
      using **`normalize.py`**;
-   - skips it if there's no website, it's not in the US, it's over 20 staff, or it's on your
-     do-not-contact list;
+   - skips it if there's no website or it's on your do-not-contact list. Headcount and US
+     location are filtered by Apollo itself, because its company search doesn't send those
+     fields back (checked on real data). They get checked again at the email step, where
+     Apollo does send them;
    - saves the rest. If the domain is already saved, the database ignores it (domains are
      unique).
 7. **It saves three things in one go:** "1 credit used", the new companies, and "next time start
@@ -37,6 +39,9 @@ file. Then you can export them to a CSV.
 
 A dry run (no `--live`) only does steps 1–4 and prints what it *would* send. It never touches
 the internet.
+
+The web page (`outbound ui`) runs exactly the same functions. "Preview" is the dry run, and
+"Fetch from Apollo" is `--live`.
 
 ## Each file
 
@@ -55,6 +60,7 @@ the internet.
 | `src/outbound/steps/export.py` | Writes the CSV | Changing the CSV columns |
 | `src/outbound/steps/suppress.py` | Adds to the do-not-contact list | Rarely |
 | `src/outbound/steps/fields.py` | Lists which fields Apollo sent (names only) | Checking the data |
+| `src/outbound/ui.py` | The web page: shows the same steps with buttons and tables; no logic of its own | Changing the screen |
 | `tests/` | Checks every file above with a fake Apollo | Any change |
 
 ## What's in the database (`data/outbound.db`)

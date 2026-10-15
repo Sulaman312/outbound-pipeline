@@ -50,9 +50,7 @@ def test_valid_segments_load(project: Path) -> None:
     accounting = segments["ai_accounting"]
     assert accounting.offer == "ai_automation"
     assert accounting.keywords == ("accounting", "bookkeeping")
-    assert accounting.max_employees == 20
     assert segments["frontend_agencies"].keywords == ()
-    assert segments["frontend_agencies"].max_employees == 20
 
 
 SEGMENT = """\
