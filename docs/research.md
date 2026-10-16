@@ -52,16 +52,21 @@ Useful search filters:
 
 Paging: up to 100 results per page and 500 pages, so 50,000 records per search at most.
 
-**Checked for M1 (2026-10-16), still open:**
+**Checked for M1 (2026-10-16):**
 
-- **Job-post signal filters: Unconfirmed.** The pilot ICP `dev_us_signal` needs "an open
-  developer job post in the last 60 days". docs.apollo.io couldn't be read from the build
-  machine (its network blocks the site). Web search found only third-party wrappers: one names
-  `q_organization_job_titles[]`, none names a posted-date filter. No Apollo page confirmed either
-  name. So the app stores the signal on the ICP but doesn't send it, and refuses to fetch an ICP
-  that has one (`JOB_SIGNAL_CONFIRMED = False` in `backend/integrations/apollo.py`). To unlock it:
-  open the Organization Search page below, find the parameters for job titles and posting date,
-  and send their exact names.
+- **Job-post signal filters: confirmed.** Wania checked the Organization Search reference
+  (docs.apollo.io/reference/organization-search) on 2026-10-16:
+  - `q_organization_job_titles[]`: job titles in the company's active job postings.
+  - `organization_job_posted_at_range[min]` / `[max]`: posting dates, as `YYYY-MM-DD`.
+  - `organization_num_jobs_range[min]` / `[max]`: number of active job postings (not used yet).
+  - `organization_job_locations[]`: locations of the jobs (not used yet).
+
+  The app sends an ICP's job titles as `q_organization_job_titles[]`, and "posted in the last N
+  days" as `[min]` = today minus N days, `[max]` = today (UTC). The window moves with the
+  calendar, so a run on a later day asks for a slightly different set of companies; progress
+  still continues at the next page. (Before this check the app refused signal ICPs:
+  `JOB_SIGNAL_CONFIRMED` in `backend/integrations/apollo.py` switches back to that.)
+  **Unconfirmed until the first live run:** how many companies Apollo reports with the signal.
 - **Location strings: Unconfirmed.** `organization_locations[]` worked with `United States` on
   the first live run (82,300 matches). The pilot ICPs use plain state names (`Texas`,
   `New York`, `Florida`). Whether Apollo prefers another form, like `Texas, US`, and whether

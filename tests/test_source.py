@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -170,18 +171,56 @@ def test_progress_is_kept_per_icp(conn: Connection) -> None:
     assert fake.pages_requested() == [1]
 
 
-def test_unconfirmed_signal_is_refused_before_any_request(conn: Connection) -> None:
+def test_signal_icp_runs_and_sends_the_job_filters(conn: Connection) -> None:
+    settings = {
+        **icp_data()["sources"]["apollo"],
+        "job_titles": ["developer", "full stack"],
+        "job_posted_within_days": 60,
+    }
+    icp = icps.create(conn, icp_data("hiring", sources={"apollo": settings}))
+    assert apollo.JOB_SIGNAL_CONFIRMED is True
+    assert source.icp_problem(icp, "apollo") is None
+    fake = FakeApollo((200, page([org(1)])))
+    result = run(conn, icp, fake)
+    assert result.saved == 1 and db.usage_this_month(conn, "apollo", "credits") == 1
+    params = fake.requests[0].url.params
+    assert params.get_list("q_organization_job_titles[]") == ["developer", "full stack"]
+    start = date.fromisoformat(params["organization_job_posted_at_range[min]"])
+    end = date.fromisoformat(params["organization_job_posted_at_range[max]"])
+    assert end - start == timedelta(days=60)
+    assert end == datetime.now(UTC).date()
+    preview = source.describe(conn, icp, "apollo", pages=1, cap=10)
+    assert "q_organization_job_titles[] = developer" in preview
+    assert "organization_job_posted_at_range[min]" in preview
+    assert "NOT SENT" not in preview and "can't run" not in preview
+
+
+def test_signal_can_be_switched_off_again(
+    conn: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the names ever turn out wrong, setting the flag back refuses signal ICPs."""
+    monkeypatch.setattr(apollo, "JOB_SIGNAL_CONFIRMED", False)
     settings = {**icp_data()["sources"]["apollo"], "job_titles": ["developer"]}
     icp = icps.create(conn, icp_data("hiring", sources={"apollo": settings}))
-    assert apollo.JOB_SIGNAL_CONFIRMED is False
     assert "job-post signal" in (source.icp_problem(icp, "apollo") or "")
     fake = FakeApollo()
     with pytest.raises(ValueError, match="job-post signal"):
         run(conn, icp, fake)
     assert fake.requests == []
-    preview = source.describe(conn, icp, "apollo", pages=1, cap=10)
-    assert "job titles developer" in preview and "NOT SENT" in preview
-    assert "can't run:" in preview
+
+
+def test_changing_the_signal_starts_again_at_page_one(conn: Connection) -> None:
+    plain = icp_data()["sources"]["apollo"]
+    icp = icps.create(
+        conn, icp_data("hiring", sources={"apollo": {**plain, "job_titles": ["developer"]}})
+    )
+    run(conn, icp, FakeApollo((200, page([org(1)], number=1))))
+    changed = icps.update(
+        conn, icp.key, icp_data(sources={"apollo": {**plain, "job_titles": ["engineer"]}})
+    )
+    fake = FakeApollo((200, page([org(2)])))
+    run(conn, changed, fake)
+    assert fake.pages_requested() == [1]
 
 
 @pytest.mark.parametrize(

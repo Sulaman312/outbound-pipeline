@@ -86,13 +86,22 @@ def test_source_unknown_icp(project: Path, capsys: pytest.CaptureFixture[str]) -
 
 @pytest.mark.parametrize(
     ("icp", "message"),
-    [("ai_accounting", "inactive"), ("dev_us_signal", "job-post signal")],
+    [("ai_accounting", "inactive"), ("nope", "no ICP called")],
 )
 def test_source_refuses_icps_that_cant_run(
     project: Path, capsys: pytest.CaptureFixture[str], icp: str, message: str
 ) -> None:
     assert call(project, "source", icp) == 2
     assert message in capsys.readouterr().err
+
+
+def test_signal_icp_dry_run_shows_the_job_filters(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert call(project, "source", "dev_us_signal") == 0
+    out = capsys.readouterr().out
+    assert "q_organization_job_titles[] = developer" in out
+    assert "organization_job_posted_at_range[min]" in out
 
 
 def test_icps_lists_them(project: Path, capsys: pytest.CaptureFixture[str]) -> None:

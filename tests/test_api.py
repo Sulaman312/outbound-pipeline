@@ -189,8 +189,10 @@ def test_preview_shows_why_a_source_or_icp_cant_run(client: TestClient) -> None:
     maps = data["previews"][1]
     assert "has no Google Maps settings" in maps["problem"] and maps["credits"] == 0
     signal = client.post("/api/source/preview", json={"icp": "dev_us_signal"}).json()
-    assert "job-post signal" in signal["previews"][0]["problem"]
-    assert "NOT SENT" in signal["previews"][0]["text"]
+    text = signal["previews"][0]["text"]
+    assert "q_organization_job_titles[] = full stack" in text
+    assert "organization_job_posted_at_range[max]" in text
+    assert "APOLLO_API_KEY" in signal["previews"][0]["problem"]  # only the missing key stops it
 
 
 @pytest.mark.parametrize(

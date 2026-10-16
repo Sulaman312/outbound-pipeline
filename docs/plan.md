@@ -200,7 +200,7 @@ Pilot: lists built by 8 Nov, launch 9–15 Nov, so M0b–M5 should work by about
 |---|---|---|
 | M0a | **Built.** Foundation: `backend/` layout, Supabase/SQLite, pipeline stages, Clay CSV, verify rules, backup, copy script, CI on Postgres. | D3, D4, D9, D12, D14 |
 | M0b | **Built.** App: FastAPI + React (Vite) for everything above. `outbound serve`. | D14 |
-| M1 | **Built.** ICPs (app page, stored in Supabase, settings per source) + Apollo sourcing per ICP; one Clay file per ICP with its people filters on the Clay page. Job-post signal stored but not sent until Apollo's filter names are confirmed (research.md §1). | D1, D15, D17–D19 |
+| M1 | **Built.** ICPs (app page, stored in Supabase, settings per source) + Apollo sourcing per ICP; one Clay file per ICP with its people filters on the Clay page. Job-post signal sent as `q_organization_job_titles[]` + `organization_job_posted_at_range` (names confirmed 2026-10-16, research.md §1). | D1, D15, D17–D19 |
 | M1b | **Built.** Google Maps (Places API (New) Text Search) as the second source: phrase x city searches per ICP, page tokens, per-search progress, request cap, closed/no-website/chain skips. First live test (1 search, 1 page, 1 request) waits for Wania's go-ahead. | D2 |
 | M2 | Enrich: Clay CSV per ICP (the per-ICP file and people filters came with M1) | D3 |
 | M3 | Verify: Instantly verifier for needs_check | D4, D5 |

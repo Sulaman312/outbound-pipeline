@@ -6,6 +6,7 @@ refuses every path that isn't on ALLOWED_PATHS.
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -20,10 +21,10 @@ CREDITS_PER_PAGE = 1  # Apollo: Organization Search costs 1 credit per page
 MAX_PER_PAGE = 100
 MAX_PAGE = 500  # Apollo shows at most 50,000 records per search (100 x 500)
 
-# The job-post signal (job titles, posted in the last N days) is stored on ICPs but not sent:
-# Apollo's parameter names for it are unconfirmed (docs/research.md, section 1). Until they are,
-# sourcing an ICP with a signal is refused rather than run without it.
-JOB_SIGNAL_CONFIRMED = False
+# The job-post signal (job titles, posted in the last N days). Apollo's parameter names were
+# confirmed on docs.apollo.io/reference/organization-search on 2026-10-16 (docs/research.md,
+# section 1). Set this back to False to refuse signal ICPs instead of sending the signal.
+JOB_SIGNAL_CONFIRMED = True
 SIGNAL_FIELDS = ("job_titles", "job_posted_within_days")
 
 
@@ -36,13 +37,29 @@ def has_signal(settings: dict[str, Any]) -> bool:
 
 
 def search_params(
-    settings: dict[str, Any], page: int, per_page: int = MAX_PER_PAGE
+    settings: dict[str, Any],
+    page: int,
+    per_page: int = MAX_PER_PAGE,
+    today: date | None = None,
 ) -> list[tuple[str, str]]:
-    """The query parameters for one page of an ICP's search (its Apollo settings)."""
+    """The query parameters for one page of an ICP's search (its Apollo settings).
+
+    The job-post signal sends the job titles, and "posted in the last N days" as a date range
+    from today minus N days to today (UTC, YYYY-MM-DD). The window moves with the calendar.
+    """
     params = [("page", str(page)), ("per_page", str(per_page))]
     params += [("organization_num_employees_ranges[]", r) for r in settings["employee_ranges"]]
     params += [("organization_locations[]", loc) for loc in settings["hq_locations"]]
     params += [("q_organization_keyword_tags[]", k) for k in settings.get("keywords", [])]
+    if JOB_SIGNAL_CONFIRMED:
+        params += [("q_organization_job_titles[]", t) for t in settings.get("job_titles", [])]
+        days = settings.get("job_posted_within_days")
+        if days:
+            end = today or datetime.now(UTC).date()
+            params.append(
+                ("organization_job_posted_at_range[min]", (end - timedelta(days=days)).isoformat())
+            )
+            params.append(("organization_job_posted_at_range[max]", end.isoformat()))
     return params
 
 

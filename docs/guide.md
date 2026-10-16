@@ -162,9 +162,10 @@ The database started with 11 ICPs: the 3 pilot ICPs (active) and the 8 old segme
 
 **Two things to know:**
 
-- **The job-post signal doesn't run yet.** Apollo's exact filter names for job posts aren't
-  confirmed (`docs/research.md`, section 1). So `dev_us_signal` shows its filters in the
-  preview but can't fetch. Once the names are confirmed, it's one switch in the code.
+- **The job-post signal is sent to Apollo** (names confirmed 2026-10-16, `docs/research.md`
+  section 1): the ICP's job titles as `q_organization_job_titles[]`, and "posted in the last N
+  days" as `organization_job_posted_at_range` from today minus N days to today. The preview
+  shows the exact dates.
 - **Signal before Pain.** A company is saved once, under the first ICP that finds it. Run
   `dev_us_signal` first; `dev_us_pain` then skips what Signal already saved.
 
@@ -259,7 +260,8 @@ never touches the network.
 - **APOLLO_API_KEY isn't set** — put it in `.env`.
 - **cap reached** — raise `caps.apollo.credits` in `config/settings.yaml` only when you mean to.
 - **403 from Apollo** — the plan or key doesn't allow Organization Search.
-- **"has a job-post signal…"** — see the ICPs section: the signal isn't confirmed yet.
+- **Few companies with a job-post signal** — the signal narrows a lot. Widen the job titles
+  or the number of days on the ICPs page (that starts the search again at page 1).
 - **"already saved: N (by this ICP or another one)"** — those companies belong to an ICP that
   found them first. That's how Signal and Pain stay apart.
 

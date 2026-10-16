@@ -323,6 +323,8 @@ def _describe_apollo(
         )
         if not apollo.JOB_SIGNAL_CONFIRMED:
             lines.append("          NOT SENT: Apollo's filter names for it are unconfirmed")
+        else:
+            lines.append("          (sent as the q_organization_job_* filters above)")
     if exhausted:
         lines.append(
             "status:   no more pages for this ICP. Change its Apollo settings to search again."

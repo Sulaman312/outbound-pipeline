@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from functools import partial
 from typing import Any
 
@@ -96,7 +97,27 @@ def test_pagination() -> None:
     assert apollo.pagination({}) == (None, None)
 
 
-def test_signal_is_never_sent_while_unconfirmed(segment: dict[str, Any]) -> None:
-    settings = {**segment, "job_titles": ["developer"], "job_posted_within_days": 60}
+def test_job_post_signal_params(segment: dict[str, Any]) -> None:
+    settings = {**segment, "job_titles": ["developer", "engineer"], "job_posted_within_days": 60}
     assert apollo.has_signal(settings)
-    assert apollo.search_params(settings, page=1) == apollo.search_params(segment, page=1)
+    extra = apollo.search_params(settings, page=1, today=date(2026, 10, 16))[
+        len(apollo.search_params(segment, page=1)) :
+    ]
+    assert extra == [
+        ("q_organization_job_titles[]", "developer"),
+        ("q_organization_job_titles[]", "engineer"),
+        ("organization_job_posted_at_range[min]", "2026-08-17"),
+        ("organization_job_posted_at_range[max]", "2026-10-16"),
+    ]
+
+
+def test_job_titles_without_a_window_send_no_dates(segment: dict[str, Any]) -> None:
+    params = apollo.search_params({**segment, "job_titles": ["developer"]}, page=1)
+    assert ("q_organization_job_titles[]", "developer") in params
+    assert not any(name.startswith("organization_job_posted_at_range") for name, _ in params)
+
+
+def test_window_crosses_a_year(segment: dict[str, Any]) -> None:
+    params = dict(apollo.search_params({**segment, "job_titles": ["dev"], "job_posted_within_days": 30},
+                                       page=1, today=date(2027, 1, 10)))  # fmt: skip
+    assert params["organization_job_posted_at_range[min]"] == "2026-12-11"
