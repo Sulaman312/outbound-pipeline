@@ -22,6 +22,7 @@ from backend.integrations import apollo
 from backend.normalize import normalize_domain
 
 PROVIDER, UNIT = "apollo", "credits"
+MAX_PAGES_PER_RUN = 50
 
 
 @dataclass
@@ -38,6 +39,27 @@ class SourceResult:
     exhausted: bool = False
     stopped_by_cap: bool = False
     error: str | None = None
+
+
+def credits_for(pages: int) -> int:
+    """The most Apollo credits a run of `pages` pages can spend."""
+    return pages * apollo.CREDITS_PER_PAGE
+
+
+def pages_problem(pages: int) -> str | None:
+    """Why this page count isn't allowed, or None."""
+    if not 1 <= pages <= MAX_PAGES_PER_RUN:
+        return f"pages must be between 1 and {MAX_PAGES_PER_RUN}"
+    return None
+
+
+def live_problem(api_key: str, cap: int | None) -> str | None:
+    """Why a live run can't start, or None. The CLI and the app both ask this first."""
+    if not api_key:
+        return "APOLLO_API_KEY isn't set. Add it to the .env file in the project folder."
+    if cap is None:
+        return "set caps.apollo.credits in config/settings.yaml before a live run."
+    return None
 
 
 def filters_hash(segment: Segment) -> str:

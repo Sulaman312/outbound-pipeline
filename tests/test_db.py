@@ -165,3 +165,21 @@ def test_describe_database_never_includes_password() -> None:
     text = db.describe_database("postgresql+psycopg://user:s3cret@db.example.com:5432/outbound")
     assert text == "postgres at db.example.com"
     assert "s3cret" not in text
+
+
+def test_a_closed_pooled_connection_is_replaced(project: Path) -> None:
+    """Supabase may end an idle connection while `outbound serve` runs; the next request works."""
+    first = db.connect(project)
+    if first.dialect != "postgresql":
+        first.close()
+        pytest.skip("only a Postgres server ends idle connections")
+    helper = db.connect(project)
+    pid = first.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+    first.close()  # back to the pool, idle
+    with helper:
+        helper.execute("SELECT pg_terminate_backend(:pid)", {"pid": pid})
+    helper.close()
+    for _ in range(2):  # whichever pooled connection comes out first
+        conn = db.connect(project)
+        assert db.count_suppression(conn) == 0
+        conn.close()

@@ -271,7 +271,9 @@ def connect(root: Path, *, url: str | None = None) -> Connection:
     if resolved.startswith("sqlite:///"):
         Path(resolved.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     if resolved not in _engines:
-        _engines[resolved] = create_engine(resolved)
+        # pre-ping: the app keeps connections in a pool for hours, and Supabase may close an
+        # idle one. A quick check on checkout replaces it instead of failing the request.
+        _engines[resolved] = create_engine(resolved, pool_pre_ping=True)
     sa_conn = _engines[resolved].connect()
     conn = Connection(sa_conn, resolved)
     with conn:
@@ -416,13 +418,21 @@ def insert_company(conn: Connection, company: dict[str, Any]) -> bool:
     return result.rowcount == 1
 
 
-def list_companies(conn: Connection, segment: str | None = None) -> list[RowMapping]:
-    """Saved companies, oldest first, leaving out any domain on the do-not-contact list."""
+def list_companies(
+    conn: Connection, segment: str | None = None, search: str | None = None
+) -> list[RowMapping]:
+    """Saved companies, oldest first, leaving out any domain on the do-not-contact list.
+
+    `search` keeps companies whose name or domain contains that text (any case).
+    """
     sql = "SELECT * FROM companies WHERE domain NOT IN (SELECT value FROM suppression)"
     params: dict[str, Any] = {}
     if segment:
         sql += " AND segment = :segment"
         params["segment"] = segment
+    if search and search.strip():
+        sql += " AND (LOWER(name) LIKE :search OR LOWER(domain) LIKE :search)"
+        params["search"] = f"%{search.strip().lower()}%"
     return conn.execute(sql + " ORDER BY id", params).fetchall()
 
 
@@ -440,6 +450,12 @@ def count_companies(conn: Connection) -> dict[str, int]:
     """Number of saved companies per segment."""
     rows = conn.execute("SELECT segment, COUNT(*) AS n FROM companies GROUP BY segment").fetchall()
     return {str(row["segment"]): int(row["n"]) for row in rows}
+
+
+def count_companies_by_status(conn: Connection) -> dict[str, int]:
+    """Number of saved companies per status (new, exported, enriched, no_contact)."""
+    rows = conn.execute("SELECT status, COUNT(*) AS n FROM companies GROUP BY status").fetchall()
+    return {str(row["status"]): int(row["n"]) for row in rows}
 
 
 # --- suppression --------------------------------------------------------------------------------

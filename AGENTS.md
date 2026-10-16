@@ -49,6 +49,10 @@ Read before doing anything:
 ```
 backend/
   cli.py                 commands only, no logic
+  app.py                 FastAPI app: /api routes + serves ui/dist (127.0.0.1 only)
+  api/                   routes by resource (overview, source, companies, clay, leads,
+                         suppression) + deps.py; routes call stage functions, no logic
+  overview.py            what the Pipeline page shows
   config.py              settings.yaml + .env
   db.py                  engine, schema, every SQL statement
   http.py, normalize.py
@@ -63,9 +67,14 @@ backend/
 scripts/copy_sqlite_to_db.py
 config/settings.yaml     caps
 config/segments.yaml     targets (M1 → ICPs)
+ui/                      React + Vite, plain CSS
+  src/api.js             every fetch to the backend
+  src/pages/             one file per sidebar page
 ```
 
-Package install: `pip install -e .`. CLI entry: `outbound`.
+Package install: `pip install -e .`. CLI entry: `outbound`. App: `outbound serve` (build the
+screens once with `npm install && npm run build` in `ui/`). Never commit `ui/dist` or
+`node_modules`.
 
 ## Code style
 
@@ -77,5 +86,8 @@ Package install: `pip install -e .`. CLI entry: `outbound`.
     exists.
 - Python 3.11+, type hints on every function.
 - Ruff: `ruff check . && ruff format .`
-- Tests are offline only (fake HTTP). Every module ships with tests. No test may need a real key.
+- UI: React function components, no UI or state library, plain CSS in `ui/src/styles.css`.
+  Keep components small; every fetch goes through `ui/src/api.js`.
+- Tests are offline only (fake HTTP). Every module ships with tests. API routes are tested with
+  FastAPI's TestClient. No test may need a real key.
   Default pytest uses SQLite. CI also runs against Postgres when `OUTBOUND_TEST_POSTGRES=1`.

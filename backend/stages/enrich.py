@@ -134,6 +134,26 @@ def missing_fields(mapping: dict[str, str | None]) -> list[str]:
     return missing
 
 
+def check_mapping(headers: list[str], mapping: dict[str, str | None]) -> dict[str, str | None]:
+    """A mapping someone picked by hand, checked against the file. Raises ValueError if wrong.
+
+    Every one of our fields is in the result; a field left out or set to "" means "not in the file".
+    """
+    unknown = sorted(set(mapping) - set(FIELDS))
+    if unknown:
+        raise ValueError(f"unknown field {unknown[0]!r}")
+    checked: dict[str, str | None] = {}
+    for name in FIELDS:
+        header = mapping.get(name) or None
+        if header is not None and header not in headers:
+            raise ValueError(f"the file has no column called {header!r}")
+        checked[name] = header
+    missing = missing_fields(checked)
+    if missing:
+        raise ValueError(f"choose a column for: {', '.join(missing)}")
+    return checked
+
+
 def read_csv(text: str) -> tuple[list[str], list[dict[str, str]]]:
     """(headers, rows) from CSV text."""
     reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))

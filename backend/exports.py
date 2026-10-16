@@ -42,9 +42,11 @@ def _plain(row: Any, columns: tuple[str, ...]) -> dict[str, object]:
     return {column: "" if row[column] is None else row[column] for column in columns}
 
 
-def company_rows(conn: Connection, segment: str | None = None) -> list[dict[str, object]]:
+def company_rows(
+    conn: Connection, segment: str | None = None, search: str | None = None
+) -> list[dict[str, object]]:
     """Saved companies as plain rows with the export columns."""
-    return [_plain(row, COLUMNS) for row in db.list_companies(conn, segment)]
+    return [_plain(row, COLUMNS) for row in db.list_companies(conn, segment, search)]
 
 
 def lead_rows(conn: Connection, state: str | None = None) -> list[dict[str, object]]:
@@ -58,6 +60,11 @@ def csv_text(rows: list[dict[str, object]], columns: tuple[str, ...] = COLUMNS) 
     writer.writeheader()
     writer.writerows(rows)
     return buffer.getvalue()
+
+
+def excel_bytes(text: str) -> bytes:
+    """CSV text as bytes Excel on Windows opens with accented names intact (UTF-8 with BOM)."""
+    return text.encode("utf-8-sig")
 
 
 def _write(path: Path, text: str) -> None:

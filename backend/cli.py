@@ -11,6 +11,7 @@ Commands:
   outbound suppress VALUE --reason TEXT  adds a domain or email to the do-not-contact list
   outbound fields [--segment S]          which fields Apollo sent (names and counts, no values)
   outbound backup                        writes every table to data/backups/<UTC time>.json
+  outbound serve                         starts the app at http://127.0.0.1:8000
 """
 
 from __future__ import annotations
@@ -19,10 +20,14 @@ import argparse
 import json
 import os
 import sys
+import threading
+import webbrowser
 from datetime import UTC, datetime
 from pathlib import Path
 
-from backend import db, exports, fields, suppression
+import uvicorn
+
+from backend import app, db, exports, fields, suppression
 from backend.config import (
     ConfigError,
     Segment,
@@ -35,8 +40,6 @@ from backend.config import (
 from backend.db import Connection
 from backend.http import new_client
 from backend.stages import enrich, source
-
-MAX_PAGES_PER_RUN = 50
 
 
 def _shown(path: Path, root: Path) -> str:
@@ -97,8 +100,9 @@ def cmd_source(
             file=sys.stderr,
         )
         return 2
-    if not 1 <= args.pages <= MAX_PAGES_PER_RUN:
-        print(f"error: --pages must be between 1 and {MAX_PAGES_PER_RUN}", file=sys.stderr)
+    problem = source.pages_problem(args.pages)
+    if problem:
+        print(f"error: --{problem}", file=sys.stderr)
         return 2
     cap = _apollo_cap(settings)
 
@@ -108,18 +112,11 @@ def cmd_source(
         return 0
 
     api_key = os.environ.get("APOLLO_API_KEY", "").strip()
-    if not api_key:
-        print(
-            "error: APOLLO_API_KEY isn't set. Add it to the .env file in the project folder.",
-            file=sys.stderr,
-        )
+    problem = source.live_problem(api_key, cap)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
         return 2
-    if cap is None:
-        print(
-            "error: set caps.apollo.credits in config/settings.yaml before a live run.",
-            file=sys.stderr,
-        )
-        return 2
+    assert cap is not None
 
     with new_client() as client:
         result = source.run_live(
@@ -241,6 +238,33 @@ def cmd_backup(
     return 0
 
 
+UI_MISSING = """The app's screens aren't built yet. Build them once (needs Node.js LTS):
+  cd ui
+  npm install
+  npm run build
+  cd ..
+Then run `outbound serve` again. Starting only the /api routes for now (enough for npm run dev)."""
+
+
+def cmd_serve(
+    args: argparse.Namespace,
+    settings: Settings,
+    segments: dict[str, Segment],
+    conn: Connection | None,
+) -> int:
+    url = f"http://127.0.0.1:{args.port}"
+    if (app.UI_DIST / "index.html").is_file():
+        print(f"The app is at {url} (only this computer can open it). Press Ctrl+C to stop.")
+        if not args.no_browser:
+            threading.Timer(1.5, webbrowser.open, [url]).start()
+    else:
+        print(UI_MISSING)
+    uvicorn.run(
+        app.create_app(settings.root), host="127.0.0.1", port=args.port, log_level="warning"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="outbound", description="Arsuno outbound pipeline")
     parser.add_argument("--root", default=".", help="project folder (default: the current folder)")
@@ -293,6 +317,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     backup = commands.add_parser("backup", help="write every table to data/backups/<UTC time>.json")
     backup.set_defaults(func=cmd_backup)
+
+    serve = commands.add_parser("serve", help="start the app in your browser (this computer only)")
+    serve.add_argument("--port", type=int, default=8000, help="port (default 8000)")
+    serve.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    serve.set_defaults(func=cmd_serve, needs_db=False)
     return parser
 
 
@@ -306,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
+    if not getattr(args, "needs_db", True):  # serve opens one connection per request instead
+        return args.func(args, settings, segments, None)
     conn = db.connect(settings.root)
     try:
         return args.func(args, settings, segments, conn)

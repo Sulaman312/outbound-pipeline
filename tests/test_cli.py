@@ -223,3 +223,39 @@ def test_backup(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert "data/backups/" in out
     files = list((project / "data" / "backups").glob("*.json"))
     assert len(files) == 1
+
+
+def test_serve_starts_the_app_on_this_computer_only(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda app, host, port, log_level: started.update(host=host, port=port)
+    )
+    monkeypatch.setattr(cli.app, "UI_DIST", project / "missing")
+    assert call(project, "serve", "--no-browser") == 0
+    assert started == {"host": "127.0.0.1", "port": 8000}
+    out = capsys.readouterr().out
+    assert "npm install" in out and "npm run build" in out
+
+
+def test_serve_opens_the_browser_when_the_ui_is_built(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dist = project / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<h1>app</h1>", encoding="utf-8")
+    opened: list[object] = []
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setattr(cli.app, "UI_DIST", dist)
+    monkeypatch.setattr(
+        cli.threading, "Timer", lambda delay, fn, args: opened.append(args) or _Now()
+    )
+    assert call(project, "serve", "--port", "8123") == 0
+    assert opened == [["http://127.0.0.1:8123"]]
+    assert "http://127.0.0.1:8123" in capsys.readouterr().out
+
+
+class _Now:
+    def start(self) -> None:
+        pass

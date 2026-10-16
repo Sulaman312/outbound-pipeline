@@ -15,8 +15,10 @@ automation, and outsourced front-end developers.
   - **dropped**: no email, invalid, or do-not-contact.
 - You can export companies or people to a CSV for Excel or Google Sheets.
 - The database is Supabase Postgres (shared); tests and a no-`DATABASE_URL` laptop use SQLite.
+- All of it works from a **web app on your own computer** (`outbound serve`), or from commands.
 
-Next: Instantly verification, then campaigns. See [docs/plan.md](docs/plan.md).
+Next: ICPs on an app page (M1), then Instantly verification and campaigns. See
+[docs/plan.md](docs/plan.md).
 
 - [docs/clay-table.md](docs/clay-table.md) — what to click in Clay for each batch
 - [docs/guide.md](docs/guide.md) — one section per module
@@ -27,7 +29,9 @@ Next: Instantly verification, then campaigns. See [docs/plan.md](docs/plan.md).
 
 ## One-time setup (Windows)
 
-1. **Python 3.11 or newer.** Check with `py --version`.
+1. **Python 3.11 or newer** (check with `py --version`) and **Node.js LTS** from
+   https://nodejs.org (check with `node --version`). Node is only needed to build the app's
+   screens.
 2. **Get the code:**
    ```powershell
    cd outbound-pipeline
@@ -38,7 +42,13 @@ Next: Instantly verification, then campaigns. See [docs/plan.md](docs/plan.md).
    ```powershell
    py -m venv .venv
    .venv\Scripts\pip install -e .
+   cd ui
+   npm install
+   npm run build
+   cd ..
    ```
+   Run the `pip install` line again after a `git pull` that changes `pyproject.toml`, and the
+   three `npm`/`cd` lines again after one that changes `ui/`.
 4. **Create a Supabase project** (free tier is fine to start). In Project Settings → Database,
    copy the **Session pooler** connection string (port **5432**). It should look like
    `postgresql://postgres.[ref]:[password]@aws-0-....pooler.supabase.com:5432/postgres`.
@@ -65,9 +75,25 @@ Next: Instantly verification, then campaigns. See [docs/plan.md](docs/plan.md).
 
 ---
 
+## Start the app
+
+```powershell
+.venv\Scripts\outbound serve
+```
+
+Your browser opens http://127.0.0.1:8000. Keep the terminal open while you use it; Ctrl+C stops
+it. Only this computer can open the app. Pages: Pipeline, Find companies, Companies, Enrich with
+Clay, Leads, Do-not-contact. What each one does: [docs/guide.md](docs/guide.md#app).
+
+If it says the screens aren't built yet, run the `cd ui`, `npm install`, `npm run build` lines
+from step 3.
+
+---
+
 ## Test it
 
-The first live test spends **1 Apollo credit**.
+The first live test spends **1 Apollo credit**. In the app: **Find companies → Preview (free)**,
+then tick **Spend up to 1 Apollo credit** and **Fetch companies**. Or with commands:
 
 1. **See the setup:** `.venv\Scripts\outbound check`
 2. **Dry run (free):** `.venv\Scripts\outbound source ai_accounting`
@@ -82,6 +108,7 @@ The first live test spends **1 Apollo credit**.
 
 | Command | What it does | Cost |
 |---|---|---|
+| `outbound serve` | Starts the app at http://127.0.0.1:8000 | free |
 | `outbound check` | Config, key status, database host/path, credits, counts | free |
 | `outbound backup` | Every table → `data/backups/<UTC time>.json` | free |
 | `outbound source SEGMENT` | Dry run: shows the Apollo request and its cost | free |
@@ -113,7 +140,11 @@ On Windows, put `.venv\Scripts\` in front of each command.
 ```bash
 pip install -e ".[dev]"
 ruff format . && ruff check . && pytest    # offline SQLite; no test needs a real key
+cd ui && npm ci && npm run build           # the screens
 ```
 
-CI also runs pytest against a Postgres service container. Layout and rules: `AGENTS.md` and
+Working on the screens: `outbound serve` in one terminal, `npm run dev` in `ui/` in another, then
+open http://localhost:5173 (it sends `/api` to port 8000 and reloads as you edit).
+
+CI also runs pytest against a Postgres service container, and builds `ui/`. Layout and rules: `AGENTS.md` and
 `docs/plan.md`. Module guide: `docs/guide.md`.

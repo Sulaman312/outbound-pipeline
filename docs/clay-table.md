@@ -6,12 +6,15 @@ for the closest match.
 
 ## 1. Make the file for Clay (our app)
 
+In the app: **Enrich with Clay → step 1**. Pick the segment and rows, **Create the file**,
+**Download**. Or in the terminal:
+
 ```
 outbound clay export --rows 200
 ```
 
-Use `--rows 50` on a Clay trial (trial tables only take 50 rows). Add `--segment NAME` for one
-segment only.
+Use 50 rows (`--rows 50`) on a Clay trial (trial tables only take 50 rows). Add `--segment NAME`
+for one segment only.
 
 Those companies are now marked "sent to Clay" and will never go out twice. Two laptops never
 claim the same company.
@@ -59,11 +62,14 @@ Validate Email, Company Domain, First Name, Last Name, Job Title, LinkedIn Profi
 
 ## 6. Bring the results back (our app)
 
+In the app: **Enrich with Clay → step 3**. Choose Clay's CSV, check the pre-filled column
+dropdowns, fill in the Clay account and credits if you know them, **Import**. Or in the terminal:
+
 ```
 outbound clay import path\to\clay.csv --account "clay-1" --credits 40
 ```
 
-`--account` and `--credits` are optional. Credits per batch let you compare Free, trial and Launch
+The account and credits are optional. Credits per batch let you compare Free, trial and Launch
 on cost per verified email.
 
 ## What happens to each person
@@ -79,5 +85,5 @@ on cost per verified email.
 - A company Clay found nobody for becomes `no_contact`.
 - A company with an email becomes `enriched`.
 
-**Importing the same file twice is safe:** repeats are skipped. See everything with
-`outbound export --contacts` or `outbound check`.
+**Importing the same file twice is safe:** repeats are skipped. See everything on the app's
+**Leads** page, or with `outbound export --contacts`.

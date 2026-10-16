@@ -10,7 +10,7 @@ from backend.normalize import normalize_domain, normalize_email
 def suppress(conn: Connection, value: str, reason: str) -> tuple[str, str, bool]:
     """Returns (normalized value, kind, newly added?). Raises ValueError for bad input."""
     if not reason.strip():
-        raise ValueError('give a reason, like --reason "existing client"')
+        raise ValueError('give a reason, like "existing client"')
     if "@" in value:
         kind, normalized = "email", normalize_email(value)
     else:

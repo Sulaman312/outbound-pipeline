@@ -2,9 +2,9 @@
 
 Read [research.md](research.md) first. Every number here comes from there.
 
-**Status:** M0a (Foundation) is built: `backend/` package, Supabase Postgres (SQLite for
-tests and offline), stage list, Clay CSV enrich, verify rules. M0b (UI) and M1–M7 are still
-design. See the decisions table at the bottom.
+**Status:** M0a (Foundation) and M0b (App) are built: `backend/` package, Supabase Postgres
+(SQLite for tests and offline), stage list, Clay CSV enrich, verify rules, and a local web app
+(FastAPI + React) for all of it. M1–M7 are still design. See the decisions table at the bottom.
 
 ## Goal
 
@@ -89,6 +89,7 @@ Concurrency:
 
 ```
 outbound check                                 # config, keys, db host/path, usage, counts   [built]
+outbound serve                                 # the app at http://127.0.0.1:8000             [built]
 outbound backup                                # every table → data/backups/<UTC>.json      [built]
 outbound source SEGMENT [--pages N]            # dry run; --live spends Apollo credits        [built]
 outbound export [--segment S]                  # companies CSV                                [built]
@@ -101,13 +102,33 @@ outbound verify                                # needs_check → Instantly verif
 outbound campaign apply … / push / sync / report
 ```
 
-Dry run by default. `--live` is required to spend credits.
+Dry run by default. `--live` is required to spend credits. In the app, the same rule is a
+"Spend up to N credits" tick box: the request must repeat the exact credits, and the box unticks
+after every run.
+
+## App (M0b)
+
+`outbound serve` starts FastAPI on 127.0.0.1:8000 (this computer only; there is no login) and
+serves the React screens built into `ui/dist`. Requests whose Host or Origin isn't this computer
+are refused.
+
+| Page | API routes | Calls |
+|---|---|---|
+| Pipeline | `GET /api/overview` | `overview.overview` (stages from `pipeline.py`) |
+| Find companies | `GET /api/segments`, `POST /api/source/preview`, `POST /api/source/run` | `source.describe`, `source.run_live` |
+| Companies | `GET /api/companies`, `GET /api/companies.csv` | `exports.company_rows` |
+| Enrich with Clay | `POST /api/clay/export`, `GET /api/clay/batches[/{id}/file]`, `POST /api/clay/columns`, `POST /api/clay/import` | `enrich.export_batch`, `detect_columns`, `check_mapping`, `import_rows` |
+| Leads | `GET /api/leads`, `GET /api/leads.csv` | `exports.lead_rows` |
+| Do-not-contact | `GET /api/suppression`, `POST /api/suppression` (no delete) | `suppression.suppress` |
+
+One database connection per request, closed at the end, so Supabase never holds an idle
+transaction. Errors are JSON `{detail}`. Routes hold no logic of their own.
 
 ## Code layout
 
 ```
 outbound-pipeline/
-  pyproject.toml          # httpx, PyYAML, sqlalchemy, psycopg; entry: outbound
+  pyproject.toml          # httpx, PyYAML, sqlalchemy, psycopg, fastapi, uvicorn; entry: outbound
   .env.example            # DATABASE_URL=, APOLLO_API_KEY=
   config/
     settings.yaml         # monthly caps
@@ -116,6 +137,9 @@ outbound-pipeline/
     research.md  plan.md  guide.md  clay-table.md
   backend/
     cli.py                # commands only
+    app.py                # FastAPI app: /api routes + the built UI
+    api/                  # routes by resource: overview, source, companies, clay, leads, suppression
+    overview.py           # what the Pipeline page shows
     config.py             # settings + .env
     db.py                 # engine, schema, every SQL statement
     http.py  normalize.py
@@ -123,6 +147,7 @@ outbound-pipeline/
     suppression.py  exports.py  fields.py
     integrations/apollo.py
     stages/source.py  enrich.py  verify.py
+  ui/                     # React + Vite: api.js (every fetch), pages/ (one per sidebar item)
   scripts/copy_sqlite_to_db.py
   tests/                  # offline on SQLite; CI also runs against Postgres
 ```
@@ -133,32 +158,53 @@ outbound-pipeline/
 |---|---|---|
 | D1 | Which source for which offer? | **OPEN.** Suggestion: Apollo for both in month 1. |
 | D2 | Google Maps / Places? | **OPEN.** Decide in month 2. |
-| D3 | Emails: Clay waterfall; plan/accounts | **DECIDED (M0a):** Clay waterfall through CSV export/import, no Google Sheet for now. Whether Apollo also supplies emails is decided in M1. Plan/account count still open; record credits per batch on import. |
+| D3 | Emails: Clay waterfall; plan/accounts | **DECIDED (2026-10-16):** Clay only, through CSV export/import by hand (Clay Free/trial has no API); no Google Sheet for now. Apollo only finds companies. Apollo person enrichment is not used: it charges 1 credit per person even with no email, and a test found very few emails. Company filters (HQ state, headcount, keywords) go to Apollo; people filters (titles, person location) go into the Clay table's "find people" step. Plan/account count still open; record credits per batch on import. |
 | D4 | Email check / maybes | **DECIDED (M0a):** Clay "valid" = verified (ready). Catch-all/unknown = needs_check, re-checked with Instantly's verifier. Hold for role addresses until D5. |
 | D5 | Role-based emails (`info@`) | **OPEN.** Suggestion: drop for Apollo leads. |
-| D6 | Instantly plan | **DECIDED (M0a):** Growth plan; campaigns created in Instantly by code. Clearing finished leads still to confirm vs Hypergrowth. |
+| D6 | Instantly plan | **DECIDED (2026-10-16):** Growth plan (1,000 contacts total, 5,000 emails a month, no webhooks); campaigns created in Instantly by code. Before a finished lead is removed from Instantly, its outcome is saved first. |
 | D7 | Inboxes | **OPEN.** Need numbers. |
 | D8 | CAN-SPAM details | **OPEN.** |
 | D9 | Sequence / tracking / campaigns | **DECIDED (M0a):** Follow the Miro campaign logic; campaigns created in Instantly (Growth) by code. |
-| D10 | Where companies come from | **DECIDED (2026-10-15):** Apollo Basic. Whether emails also come from Apollo is M1. |
+| D10 | Where companies come from | **DECIDED (2026-10-15):** Apollo Basic, Organization Search only (1 credit per 100 companies). Emails come from Clay (D3). |
 | D11 | Re-contact | **OPEN.** Suggestion: once per offer. |
 | D12 | Where the database lives | **DECIDED (M0a):** Supabase Postgres, shared by two laptops. Tests use SQLite. |
 | D13 | AI-written first line | **OPEN.** Snooze until sending works. |
-| D14 | UI | **DECIDED (M0a):** FastAPI + React (Vite). Streamlit is removed. Built in M0b. |
+| D14 | UI | **DECIDED (M0a), BUILT (M0b):** FastAPI + React (Vite), local only (127.0.0.1). Streamlit is removed. |
+| D15 | Where targets live | **DECIDED (2026-10-16):** ICPs are edited on an app page and stored in Supabase, replacing `config/segments.yaml` (M1). Caps stay in `config/settings.yaml` as hard stops. |
+| D16 | Parked until just before M5 | Developer offer details; Arsuno's legal name and postal address for the footer (D8); inbox warmup on arsuno.io and arsuno.si (D7); tracking (the Miro plan has no tracking on day 1, but its follow-up branches depend on clicks and opens). |
 
 ## Build order
 
+One module at a time; each is usable in the app and ships with its `docs/guide.md` section.
+Pilot: lists built by 8 Nov, launch 9–15 Nov, so M0b–M5 should work by about 7 Nov.
+
 | Step | What | Needs |
 |---|---|---|
-| M0a | **Built.** Foundation: `backend/` layout, Supabase/SQLite, pipeline stages, Clay CSV, verify rules, backup, copy script, CI on Postgres. | D3, D4, D9, D12, D14 (partial) |
-| M0b | FastAPI + React (Vite) UI for the built stages | D14 |
-| M1 | ICPs replace segments; decide Apollo vs Clay for emails | D1, D3/D10 email source |
-| M2 | Instantly verifier for needs_check | D4, D5 |
-| M3 | Campaign from Miro logic; push leads | D6–D9 |
-| M4 | Sync, suppression, clearing finished leads | D6, D11 |
-| M5 | Report | — |
-| M6 | Personalize / QA gates | D13 if AI line |
-| M7 | Google Places | only if D2 = yes |
+| M0a | **Built.** Foundation: `backend/` layout, Supabase/SQLite, pipeline stages, Clay CSV, verify rules, backup, copy script, CI on Postgres. | D3, D4, D9, D12, D14 |
+| M0b | **Built.** App: FastAPI + React (Vite) for everything above. `outbound serve`. | D14 |
+| M1 | ICPs (app page, stored in Supabase) + Source from them | D1, D15 |
+| M2 | Enrich: Clay CSV per ICP (people filters in the Clay steps) | D3 |
+| M3 | Verify: Instantly verifier for needs_check | D4, D5 |
+| M4 | Personalize + QA + review queue | D13 if AI line |
+| M5 | Send: Instantly campaigns created by code | D6–D9, D16 |
+| M6 | Track + classify replies | D6, D11 |
+| M7 | Follow-up campaigns + weekly report | — |
+
+First ICPs (tentative, from the launch plan; they go into the ICP page in M1):
+
+- **DEV_US_Signal_v1:** software/SaaS/dev agencies, 1–10 staff, HQ Texas + New York; people:
+  Founder, Co-Founder, CEO, CTO, Owner; signal: open developer/engineer/full-stack job post in
+  the last 60 days; 250 leads; arsuno.io; offer: full-stack developer outsourcing; exclude IT
+  outsourcing and staff augmentation firms.
+- **DEV_US_Pain_v1:** same ICP, no hiring signal found; 250 leads; arsuno.io.
+- **BPA_US_Recruit_CaseStudy_v1:** staffing and recruiting agencies, 11–50 staff (1–10 only
+  with at least 5 staff), HQ Texas + Florida; people: Founder, Owner, CEO, President, Managing
+  Director, Director of Operations, Head of Delivery; 500 leads; arsuno.si; offer: business
+  process automation (AI sourcing and screening); exclude solo recruiters, firms over 200 staff,
+  national chains' branch offices.
+
+Sequence: 4 steps (day 1, 3, 7, 14), send window 9–11am Eastern. Success test: positive reply
+rate of 2% or more after 300 delivered emails.
 
 ## What was binned
 
