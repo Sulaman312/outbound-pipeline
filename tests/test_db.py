@@ -16,7 +16,7 @@ def company(domain: str, source_id: str, **fields: object) -> dict[str, object]:
         "name": domain,
         "source": "apollo",
         "source_id": source_id,
-        "segment": "s",
+        "icp": "s",
     }
     base.update(fields)
     return base
@@ -133,11 +133,12 @@ def test_suppression_and_listing(conn: db.Connection) -> None:
 
 
 def test_progress_round_trip(conn: db.Connection) -> None:
-    assert db.get_progress(conn, "s") is None
+    assert db.get_progress(conn, "s", "apollo") is None
     with conn:
-        db.save_progress(conn, "s", "hash1", 2, 500, False)
-        db.save_progress(conn, "s", "hash1", 3, 510, True)
-    row = db.get_progress(conn, "s")
+        db.save_progress(conn, "s", "apollo", "hash1", 2, 500, False)
+        db.save_progress(conn, "s", "apollo", "hash1", 3, 510, True)
+    row = db.get_progress(conn, "s", "apollo")
+    assert db.get_progress(conn, "s", "google_maps") is None  # kept per source
     assert row is not None
     assert (row["next_page"], row["total_entries"], row["exhausted"]) == (3, 510, 1)
 

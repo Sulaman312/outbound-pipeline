@@ -27,7 +27,7 @@ CLAY_HEADERS = [
 def conn(project: Path) -> Connection:
     connection = db.connect(project)
     with connection:
-        for i in range(1, 6):
+        for i in range(1, 7):  # firm6 belongs to another ICP: a Clay file never takes it
             db.insert_company(
                 connection,
                 {
@@ -35,7 +35,7 @@ def conn(project: Path) -> Connection:
                     "name": f"Firm {i}",
                     "source": "apollo",
                     "source_id": f"org{i}",
-                    "segment": "ai_accounting" if i <= 3 else "frontend_agencies",
+                    "icp": "ai_accounting" if i <= 5 else "frontend_agencies",
                     "linkedin_url": f"http://www.linkedin.com/company/firm{i}",
                 },
             )
@@ -71,22 +71,23 @@ def test_export_writes_file_and_marks_companies(conn: Connection, project: Path)
     with conn:
         db.add_suppression(conn, "firm2.com", "domain", "client")
     result = enrich.export_batch(conn, project, "ai_accounting", rows=10)
-    assert result is not None and result.rows == 2  # firm1 and firm3; firm2 is do-not-contact
+    assert result is not None and result.rows == 4  # firm2 is do-not-contact
     text = result.path.read_text(encoding="utf-8")
     assert not text.startswith("﻿")  # no BOM, so Clay's first column name stays clean
     rows = list(csv.DictReader(io.StringIO(text)))
-    assert [r["domain"] for r in rows] == ["firm1.com", "firm3.com"]
+    assert [r["domain"] for r in rows] == ["firm1.com", "firm3.com", "firm4.com", "firm5.com"]
+    assert {r["icp"] for r in rows} == {"ai_accounting"}
     assert rows[0]["company_id"].isdigit()
     assert statuses(conn)["firm1.com"] == "exported"
-    assert statuses(conn)["firm4.com"] == "new"
+    assert statuses(conn)["firm6.com"] == "new"
 
 
 def test_export_respects_row_limit_and_never_repeats(conn: Connection, project: Path) -> None:
-    first = enrich.export_batch(conn, project, None, rows=3)
-    second = enrich.export_batch(conn, project, None, rows=3)
+    first = enrich.export_batch(conn, project, "ai_accounting", rows=3)
+    second = enrich.export_batch(conn, project, "ai_accounting", rows=3)
     assert first is not None and second is not None
     assert (first.rows, second.rows) == (3, 2)
-    assert enrich.export_batch(conn, project, None, rows=3) is None
+    assert enrich.export_batch(conn, project, "ai_accounting", rows=3) is None
     assert first.batch_id != second.batch_id
 
 
@@ -119,7 +120,7 @@ def run_import(conn: Connection, text: str, **kwargs: object) -> enrich.ImportRe
 
 
 def test_import_decides_and_saves(conn: Connection, project: Path) -> None:
-    enrich.export_batch(conn, project, None, rows=10)
+    enrich.export_batch(conn, project, "ai_accounting", rows=10)
     with conn:
         db.add_suppression(conn, "blocked@firm5.com", "email", "asked to stop")
     text = clay_csv(
@@ -160,13 +161,14 @@ def test_companies_clay_returned_nothing_for_become_no_contact(
         "firm1.com": "enriched",
         "firm2.com": "no_contact",
         "firm3.com": "no_contact",
-        "firm4.com": "new",
-        "firm5.com": "new",
+        "firm4.com": "no_contact",
+        "firm5.com": "no_contact",
+        "firm6.com": "new",
     }
 
 
 def test_import_twice_is_safe(conn: Connection, project: Path) -> None:
-    enrich.export_batch(conn, project, None, rows=10)
+    enrich.export_batch(conn, project, "ai_accounting", rows=10)
     text = clay_csv([person("firm1.com", "jane@firm1.com")])
     run_import(conn, text)
     again = run_import(conn, text)
@@ -175,7 +177,7 @@ def test_import_twice_is_safe(conn: Connection, project: Path) -> None:
 
 
 def test_match_by_company_id_or_email_domain(conn: Connection, project: Path) -> None:
-    exported = enrich.export_batch(conn, project, None, rows=10)
+    exported = enrich.export_batch(conn, project, "ai_accounting", rows=10)
     assert exported is not None
     ids = {
         r["domain"]: r["company_id"] for r in csv.DictReader(io.StringIO(exported.path.read_text()))
@@ -203,7 +205,7 @@ def test_import_refuses_without_needed_columns(conn: Connection) -> None:
 
 
 def test_describe_import(conn: Connection, project: Path) -> None:
-    enrich.export_batch(conn, project, None, rows=10)
+    enrich.export_batch(conn, project, "ai_accounting", rows=10)
     result = run_import(conn, clay_csv([person("firm1.com", "jane@firm1.com")]), credits=4)
     text = enrich.describe_import(conn, result, 4)
     assert "verified        1" in text

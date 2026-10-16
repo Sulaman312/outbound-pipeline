@@ -10,7 +10,6 @@ from typing import Any
 
 import httpx
 
-from backend.config import Segment
 from backend.http import HttpError, send
 
 BASE_URL = "https://api.apollo.io"
@@ -21,19 +20,29 @@ CREDITS_PER_PAGE = 1  # Apollo: Organization Search costs 1 credit per page
 MAX_PER_PAGE = 100
 MAX_PAGE = 500  # Apollo shows at most 50,000 records per search (100 x 500)
 
+# The job-post signal (job titles, posted in the last N days) is stored on ICPs but not sent:
+# Apollo's parameter names for it are unconfirmed (docs/research.md, section 1). Until they are,
+# sourcing an ICP with a signal is refused rather than run without it.
+JOB_SIGNAL_CONFIRMED = False
+SIGNAL_FIELDS = ("job_titles", "job_posted_within_days")
+
 
 class ApolloError(Exception):
     """Apollo said no, or couldn't be reached. The message says what to do."""
 
 
+def has_signal(settings: dict[str, Any]) -> bool:
+    return any(settings.get(name) for name in SIGNAL_FIELDS)
+
+
 def search_params(
-    segment: Segment, page: int, per_page: int = MAX_PER_PAGE
+    settings: dict[str, Any], page: int, per_page: int = MAX_PER_PAGE
 ) -> list[tuple[str, str]]:
-    """The query parameters for one page of a segment's search."""
+    """The query parameters for one page of an ICP's search (its Apollo settings)."""
     params = [("page", str(page)), ("per_page", str(per_page))]
-    params += [("organization_num_employees_ranges[]", r) for r in segment.employees]
-    params += [("organization_locations[]", loc) for loc in segment.locations]
-    params += [("q_organization_keyword_tags[]", k) for k in segment.keywords]
+    params += [("organization_num_employees_ranges[]", r) for r in settings["employee_ranges"]]
+    params += [("organization_locations[]", loc) for loc in settings["hq_locations"]]
+    params += [("q_organization_keyword_tags[]", k) for k in settings.get("keywords", [])]
     return params
 
 
@@ -91,10 +100,14 @@ def _post(
 
 
 def search_companies(
-    client: httpx.Client, api_key: str, segment: Segment, page: int, per_page: int = MAX_PER_PAGE
+    client: httpx.Client,
+    api_key: str,
+    settings: dict[str, Any],
+    page: int,
+    per_page: int = MAX_PER_PAGE,
 ) -> dict[str, Any]:
-    """Fetch one page of companies for a segment. Costs 1 Apollo credit."""
-    return _post(client, api_key, ORG_SEARCH_PATH, search_params(segment, page, per_page))
+    """Fetch one page of companies for an ICP's Apollo settings. Costs 1 Apollo credit."""
+    return _post(client, api_key, ORG_SEARCH_PATH, search_params(settings, page, per_page))
 
 
 def companies_in(data: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1,7 +1,8 @@
-"""Copy an old data/outbound.db (schema v2, SQLite) into DATABASE_URL.
+"""Copy an old data/outbound.db (the pre-M0a SQLite layout) into DATABASE_URL.
 
 Safe to run twice (ON CONFLICT DO NOTHING). Prints rows copied per table.
-Maps contacts.decision/reason -> leads.state/state_reason (ready->verified, etc.).
+Maps contacts.decision/reason -> leads.state/state_reason (ready->verified, etc.), and
+segment -> icp. Each old segment is already an inactive ICP in the database.
 
 Usage (from the project folder, with DATABASE_URL set):
   .venv\\Scripts\\python scripts/copy_sqlite_to_db.py
@@ -46,6 +47,8 @@ def _copy_table(
                 if src_col == "decision":
                     value = decision_to_state.get(str(value), value)
                 params[dst_col] = value
+            if dst_name == "sourcing_progress":
+                params.setdefault("source", "apollo")  # the only source before ICPs
             if dst_name == "leads":
                 params.setdefault("state_changed_at", params.get("created_at") or now_utc())
             cols = list(params)
@@ -67,9 +70,9 @@ def copy_sqlite(source_path: Path, dest: object) -> dict[str, int]:
     table_map: list[tuple[str, str, dict[str, str]]] = [
         ("suppression", "suppression", {}),
         ("usage", "usage", {}),
-        ("sourcing_progress", "sourcing_progress", {}),
-        ("batches", "batches", {}),
-        ("companies", "companies", {}),
+        ("sourcing_progress", "sourcing_progress", {"segment": "icp"}),
+        ("batches", "batches", {"segment": "icp"}),
+        ("companies", "companies", {"segment": "icp"}),
         ("contacts", "leads", {"decision": "state", "reason": "state_reason"}),
     ]
     source = sqlite3.connect(source_path)

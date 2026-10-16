@@ -16,6 +16,7 @@ const COLUMNS = [
   { key: "name", label: "Name", render: (r) => `${r.first_name} ${r.last_name}`.trim() },
   { key: "title", label: "Title" },
   { key: "company_name", label: "Company", render: (r) => r.company_name || r.company_domain },
+  { key: "icp", label: "ICP" },
   { key: "state", label: "State", render: (r) => <Badge value={r.state} /> },
   { key: "state_reason", label: "Why", wrap: true },
   { key: "created_at", label: "Added", render: (r) => shortDate(r.created_at) },

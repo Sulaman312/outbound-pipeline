@@ -68,8 +68,10 @@ export default function Pipeline() {
             </div>
           ))}
           <div className="fact-row">
-            <dt>Segments</dt>
-            <dd>{data.segments} in config/segments.yaml</dd>
+            <dt>ICPs</dt>
+            <dd>
+              {data.icps.active} active of {data.icps.total} (<a href="#/icps">ICPs page</a>)
+            </dd>
           </div>
         </dl>
       </Card>

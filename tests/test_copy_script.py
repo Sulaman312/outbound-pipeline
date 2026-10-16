@@ -91,6 +91,10 @@ def _build_old_sqlite(path: Path) -> None:
     conn.execute(
         "INSERT INTO usage (provider, unit, month, amount) VALUES ('apollo', 'credits', '2026-10', 3)"
     )
+    conn.execute(
+        "INSERT INTO sourcing_progress (segment, filters_hash, next_page, exhausted, updated_at) "
+        "VALUES ('ai_accounting', 'abc', 3, 0, '2026-10-15T00:00:00Z')"
+    )
     conn.commit()
     conn.close()
 
@@ -118,6 +122,9 @@ def test_copy_sqlite_maps_decisions_and_is_idempotent(tmp_path: Path, old_db: Pa
         assert leads["jane@acme.com"]["state"] == "verified"
         assert leads["maybe@acme.com"]["state"] == "needs_check"
         assert leads["jane@acme.com"]["state_reason"] == "Clay says valid"
+        assert leads["jane@acme.com"]["icp"] == "ai_accounting"  # segment -> icp
+        progress = db.get_progress(dest, "ai_accounting", "apollo")
+        assert progress is not None and progress["next_page"] == 3
 
         second = copy_sqlite(old_db, dest)
         assert second["companies"] == 0

@@ -6,21 +6,21 @@ for the closest match.
 
 ## 1. Make the file for Clay (our app)
 
-In the app: **Enrich with Clay → step 1**. Pick the segment and rows, **Create the file**,
-**Download**. Or in the terminal:
+In the app: **Enrich with Clay**. Pick the ICP at the top, then in step 1 the rows, **Create
+the file**, **Download**. One file holds one ICP, because each ICP looks for different people.
+Or in the terminal:
 
 ```
-outbound clay export --rows 200
+outbound clay export bpa_us_recruit --rows 200
 ```
 
-Use 50 rows (`--rows 50`) on a Clay trial (trial tables only take 50 rows). Add `--segment NAME`
-for one segment only.
+Use 50 rows (`--rows 50`) on a Clay trial (trial tables only take 50 rows).
 
 Those companies are now marked "sent to Clay" and will never go out twice. Two laptops never
 claim the same company.
 
 The file has 5 columns: `company_id` (ours, so the results can be matched back), `domain`,
-`name`, `linkedin_url` and `segment`.
+`name`, `linkedin_url` and `icp`.
 
 ## 2. Put it in Clay
 
@@ -33,8 +33,12 @@ The file has 5 columns: `company_id` (ours, so the results can be matched back),
 1. **Add column**, then search **"Find people"**. Clay's action that finds people at a company
    may be called "Find people at these companies" or "Find contacts at company".
 2. **Company:** use the `domain` column.
-3. **Job titles:** Founder, Co-Founder, Owner, CEO, President.
+3. **Job titles** and **person location:** the ones the app shows in step 2 for this ICP (from
+   the ICP's "People to find in Clay"). For `bpa_us_recruit`, for example: Founder, Owner, CEO,
+   President, Managing Director, Director of Operations, Head of Delivery, in Texas or Florida.
 4. **Limit:** 1 person per company.
+5. **Leave out** the companies the ICP's "Exclude" note names (shown in step 2). Apollo can't
+   filter these, so it's done here, by eye.
 
 This gives a people table (or people rows), with columns like First Name, Last Name, Job Title,
 LinkedIn Profile and Company Domain.

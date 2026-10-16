@@ -1,7 +1,7 @@
 """The Clay round trip: a CSV of companies goes to Clay, and Clay's CSV of people comes back.
 
 Export claims new companies in one UPDATE ... RETURNING so two laptops never take the same
-row, writes data/clay/batch_<time>_<segment>.csv with our own company_id, and records the batch.
+row, writes data/clay/batch_<time>_<icp>.csv with our own company_id, and records the batch.
 
 Import reads the CSV you downloaded from Clay and matches each row to our company: by
 company_id, then by domain, then by the email's domain. It applies verify.decide() and saves
@@ -26,7 +26,7 @@ from backend.normalize import normalize_domain, normalize_email
 from backend.stages import verify
 
 DEFAULT_ROWS = 200  # Clay Free allows 200 rows per table; use 50 on a Clay trial
-EXPORT_COLUMNS = ("company_id", "domain", "name", "linkedin_url", "segment")
+EXPORT_COLUMNS = ("company_id", "domain", "name", "linkedin_url", "icp")
 
 # Our field -> (label shown to people, Clay column names it may have, best first).
 FIELDS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -68,15 +68,15 @@ class ExportResult:
 
 
 def export_batch(
-    conn: Connection, root: Path, segment: str | None, rows: int = DEFAULT_ROWS
+    conn: Connection, root: Path, icp: str, rows: int = DEFAULT_ROWS
 ) -> ExportResult | None:
-    """Claim and write the next `rows` waiting companies to a CSV for Clay. None if nothing waiting."""
+    """Claim the next `rows` waiting companies of one ICP into a CSV for Clay. None if none wait."""
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    rel = f"data/clay/batch_{stamp}_{segment or 'all'}.csv"
+    rel = f"data/clay/batch_{stamp}_{icp}.csv"
     path = root / rel
     with conn:  # if the file can't be written, nothing stays claimed
-        batch_id = db.create_batch(conn, rel, 0, segment)
-        companies = db.claim_companies_for_clay(conn, segment, rows, batch_id)
+        batch_id = db.create_batch(conn, rel, 0, icp)
+        companies = db.claim_companies_for_clay(conn, icp, rows, batch_id)
         if not companies:
             db.delete_batch(conn, batch_id)
             return None
@@ -92,7 +92,7 @@ def export_batch(
                     company["domain"],
                     company["name"],
                     company["linkedin_url"] or "",
-                    company["segment"],
+                    company["icp"],
                 ]
             )
         path.write_text(

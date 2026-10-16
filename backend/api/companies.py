@@ -8,8 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Response
 
 from backend import exports
-from backend.api.deps import get_conn, get_segments, segment_or_400
-from backend.config import Segment
+from backend.api.deps import get_conn, icp_or_400
 from backend.db import Connection
 
 router = APIRouter(tags=["companies"])
@@ -20,24 +19,22 @@ SHOWN = 500  # rows the table shows; the CSV has all of them
 @router.get("/companies")
 def list_companies(
     conn: Annotated[Connection, Depends(get_conn)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
-    segment: str | None = None,
+    icp: str | None = None,
     search: str | None = None,
 ) -> dict[str, Any]:
-    segment_or_400(segments, segment)
-    rows = exports.company_rows(conn, segment, search)
+    icp_or_400(conn, icp)
+    rows = exports.company_rows(conn, icp, search)
     return {"total": len(rows), "shown": min(len(rows), SHOWN), "rows": rows[:SHOWN]}
 
 
 @router.get("/companies.csv")
 def download_companies(
     conn: Annotated[Connection, Depends(get_conn)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
-    segment: str | None = None,
+    icp: str | None = None,
     search: str | None = None,
 ) -> Response:
-    segment_or_400(segments, segment)
-    text = exports.csv_text(exports.company_rows(conn, segment, search))
+    icp_or_400(conn, icp)
+    text = exports.csv_text(exports.company_rows(conn, icp, search))
     return csv_response(text, exports.default_path(Path("."), "companies").name)
 
 

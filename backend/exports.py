@@ -15,7 +15,7 @@ from backend import db
 from backend.db import Connection
 
 # Headcount, location and industry columns come back once the email step fills them.
-COLUMNS = ("domain", "name", "segment", "linkedin_url", "status", "source", "created_at")
+COLUMNS = ("domain", "name", "icp", "linkedin_url", "status", "source", "created_at")
 LEAD_COLUMNS = (
     "email",
     "first_name",
@@ -23,7 +23,7 @@ LEAD_COLUMNS = (
     "title",
     "company_domain",
     "company_name",
-    "segment",
+    "icp",
     "state",
     "state_reason",
     "clay_status",
@@ -43,10 +43,10 @@ def _plain(row: Any, columns: tuple[str, ...]) -> dict[str, object]:
 
 
 def company_rows(
-    conn: Connection, segment: str | None = None, search: str | None = None
+    conn: Connection, icp: str | None = None, search: str | None = None
 ) -> list[dict[str, object]]:
     """Saved companies as plain rows with the export columns."""
-    return [_plain(row, COLUMNS) for row in db.list_companies(conn, segment, search)]
+    return [_plain(row, COLUMNS) for row in db.list_companies(conn, icp, search)]
 
 
 def lead_rows(conn: Connection, state: str | None = None) -> list[dict[str, object]]:
@@ -73,9 +73,9 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8-sig", newline="")
 
 
-def export_companies(conn: Connection, path: Path, segment: str | None = None) -> int:
+def export_companies(conn: Connection, path: Path, icp: str | None = None) -> int:
     """Write the companies CSV and return how many it holds."""
-    rows = company_rows(conn, segment)
+    rows = company_rows(conn, icp)
     _write(path, csv_text(rows))
     return len(rows)
 

@@ -1,4 +1,4 @@
-"""config.py: settings, segments and .env loading."""
+"""config.py: settings and .env loading."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.config import ConfigError, key_status, load_env, load_segments, load_settings
+from backend.config import ConfigError, key_status, load_env, load_settings
 
 
 def write(project: Path, name: str, text: str) -> None:
@@ -42,55 +42,6 @@ def test_settings_not_a_mapping(project: Path) -> None:
     write(project, "settings.yaml", "- just\n- a list\n")
     with pytest.raises(ConfigError, match="mapping"):
         load_settings(project)
-
-
-def test_valid_segments_load(project: Path) -> None:
-    segments = load_segments(project)
-    assert sorted(segments) == ["ai_accounting", "frontend_agencies"]
-    accounting = segments["ai_accounting"]
-    assert accounting.offer == "ai_automation"
-    assert accounting.keywords == ("accounting", "bookkeeping")
-    assert segments["frontend_agencies"].keywords == ()
-
-
-SEGMENT = """\
-segments:
-  {name}:
-    offer: {offer}
-    description: test
-    employees: [{employees}]
-    locations: ["United States"]
-    keywords: ["x"]
-{extra}"""
-
-
-@pytest.mark.parametrize(
-    ("name", "offer", "employees", "extra", "message"),
-    [
-        ("Bad-Name", "frontend", '"1,20"', "", "lowercase"),
-        ("ok", "sales", '"1,20"', "", "offer"),
-        ("ok", "frontend", '"20,1"', "", "min <= max"),
-        ("ok", "frontend", '"1-20"', "", "1,20"),
-        ("ok", "frontend", "", "", "must not be empty"),
-        ("ok", "frontend", '"1,20"', "    pages: 3\n", "unknown key 'pages'"),
-    ],
-)
-def test_bad_segments(
-    project: Path, name: str, offer: str, employees: str, extra: str, message: str
-) -> None:
-    write(
-        project,
-        "segments.yaml",
-        SEGMENT.format(name=name, offer=offer, employees=employees, extra=extra),
-    )
-    with pytest.raises(ConfigError, match=message):
-        load_segments(project)
-
-
-def test_segment_missing_field(project: Path) -> None:
-    write(project, "segments.yaml", "segments:\n  ok:\n    offer: frontend\n")
-    with pytest.raises(ConfigError, match="missing 'description'"):
-        load_segments(project)
 
 
 def test_load_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

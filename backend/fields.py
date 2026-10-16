@@ -13,9 +13,9 @@ from backend import db
 from backend.db import Connection
 
 
-def field_counts(conn: Connection, segment: str | None = None) -> tuple[int, list[tuple[str, int]]]:
+def field_counts(conn: Connection, icp: str | None = None) -> tuple[int, list[tuple[str, int]]]:
     """(number of records, [(field name, how many records have a value)]), sorted by name."""
-    raws = db.raw_records(conn, segment)
+    raws = db.raw_records(conn, icp)
     counts: Counter[str] = Counter()
     for raw in raws:
         try:
@@ -31,7 +31,7 @@ def field_counts(conn: Connection, segment: str | None = None) -> tuple[int, lis
 
 def describe(total: int, counts: list[tuple[str, int]]) -> str:
     if not total:
-        return "No saved companies yet. Run `outbound source SEGMENT --live` first."
+        return "No saved companies yet. Find companies first (outbound source ICP --live, or the Find companies page)."
     width = max(len(name) for name, _ in counts) if counts else 0
     lines = [f"Fields in {total} saved records (how many have a value). Names only, no values:"]
     lines += [f"  {name.ljust(width)}  {filled}" for name, filled in counts]

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import RequestResponseEndpoint
 
-from backend.api import clay, companies, leads, overview, source, suppression
+from backend.api import clay, companies, icps, leads, overview, source, suppression
 from backend.config import ConfigError, load_env
 from backend.http import new_client
 
@@ -62,7 +62,7 @@ def create_app(root: Path, *, ui_dist: Path = UI_DIST) -> FastAPI:
     app.middleware("http")(_local_origin_only)
     app.add_exception_handler(ConfigError, _config_error)
     app.add_exception_handler(Exception, _unexpected_error)
-    for module in (overview, source, companies, clay, leads, suppression):
+    for module in (overview, icps, source, companies, clay, leads, suppression):
         app.include_router(module.router, prefix="/api")
     if (ui_dist / "index.html").is_file():
         app.mount("/", StaticFiles(directory=ui_dist, html=True), name="ui")

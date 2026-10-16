@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 from functools import partial
-from pathlib import Path
+from typing import Any
 
 import pytest
-from fakes import FakeApollo, org, page
+from fakes import FakeApollo, icp_data, org, page
 
 from backend import http
-from backend.config import Segment, load_segments
 from backend.integrations import apollo
 
 
 @pytest.fixture
-def segment(project: Path) -> Segment:
-    return load_segments(project)["ai_accounting"]
+def segment() -> dict[str, Any]:
+    return icp_data()["sources"]["apollo"]
 
 
-def test_search_params(segment: Segment) -> None:
+def test_search_params(segment: dict[str, Any]) -> None:
     assert apollo.search_params(segment, page=3) == [
         ("page", "3"),
         ("per_page", "100"),
@@ -29,7 +28,7 @@ def test_search_params(segment: Segment) -> None:
     ]
 
 
-def test_request_shape_and_key_in_header_only(segment: Segment) -> None:
+def test_request_shape_and_key_in_header_only(segment: dict[str, Any]) -> None:
     fake = FakeApollo((200, page([org(1)])))
     apollo.search_companies(fake.client(), "secret-123", segment, page=1)
     request = fake.requests[0]
@@ -43,7 +42,7 @@ def test_request_shape_and_key_in_header_only(segment: Segment) -> None:
     ]
 
 
-def test_only_allowed_paths(segment: Segment) -> None:
+def test_only_allowed_paths(segment: dict[str, Any]) -> None:
     fake = FakeApollo()
     with pytest.raises(apollo.ApolloError, match="allowed list"):
         apollo._post(fake.client(), "key", "/api/v1/people/bulk_match", [])
@@ -60,7 +59,7 @@ def test_only_allowed_paths(segment: Segment) -> None:
     ],
 )
 def test_error_messages(
-    segment: Segment, status: int, message: str, monkeypatch: pytest.MonkeyPatch
+    segment: dict[str, Any], status: int, message: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(apollo, "send", partial(http.send, sleep=lambda seconds: None))
     responses = [(status, {"error": "nope"})] * (4 if status == 500 else 1)  # 500s are retried
@@ -95,3 +94,9 @@ def test_to_company_maps_only_fields_apollo_sends() -> None:
 def test_pagination() -> None:
     assert apollo.pagination(page([], total_pages=4)) == (400, 4)
     assert apollo.pagination({}) == (None, None)
+
+
+def test_signal_is_never_sent_while_unconfirmed(segment: dict[str, Any]) -> None:
+    settings = {**segment, "job_titles": ["developer"], "job_posted_within_days": 60}
+    assert apollo.has_signal(settings)
+    assert apollo.search_params(settings, page=1) == apollo.search_params(segment, page=1)

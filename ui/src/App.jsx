@@ -1,6 +1,7 @@
 // The frame: a sidebar with one link per page. The address is #/page, so refresh keeps your place.
 import { useEffect, useState } from "react";
 import Pipeline from "./pages/Pipeline.jsx";
+import Icps from "./pages/Icps.jsx";
 import FindCompanies from "./pages/FindCompanies.jsx";
 import Companies from "./pages/Companies.jsx";
 import Clay from "./pages/Clay.jsx";
@@ -9,6 +10,7 @@ import DoNotContact from "./pages/DoNotContact.jsx";
 
 const PAGES = [
   { path: "pipeline", label: "Pipeline", Page: Pipeline },
+  { path: "icps", label: "ICPs", Page: Icps },
   { path: "find", label: "Find companies", Page: FindCompanies },
   { path: "companies", label: "Companies", Page: Companies },
   { path: "clay", label: "Enrich with Clay", Page: Clay },

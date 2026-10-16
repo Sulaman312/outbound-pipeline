@@ -1,8 +1,9 @@
-"""Segments, and finding companies through Apollo.
+"""Finding companies for an ICP, from one or more sources.
 
-POST /source/preview is the dry run: it reads only our database and never calls Apollo.
+POST /source/preview is the dry run: it reads only our database and never calls a source.
 POST /source/run spends credits, and only when the body repeats the exact number of credits
 the run can spend. Same rules as `outbound source --live`: key set, cap set, cap never exceeded.
+Sources run one after another in the order given, all saving into the same companies table.
 """
 
 from __future__ import annotations
@@ -15,50 +16,42 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from backend import db
-from backend.api.deps import get_conn, get_segments, get_settings, segment_or_400, sentence
-from backend.config import Segment, Settings
+from backend.api.deps import get_conn, get_settings, icp_or_400, sentence
+from backend.config import Settings
 from backend.db import Connection
+from backend.icps import Icp
+from backend.sources import BY_KEY
 from backend.stages import source
 
 router = APIRouter(tags=["source"])
 
 
 class SourceRequest(BaseModel):
-    segment: str
+    icp: str
+    sources: list[str] = ["apollo"]
     pages: int = 1
 
 
 class RunRequest(SourceRequest):
-    confirm_credits: int  # must equal the most this run can spend
+    confirm_credits: int  # must equal the most this run can spend, all sources together
 
 
-@router.get("/segments")
-def list_segments(
-    conn: Annotated[Connection, Depends(get_conn)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
-) -> list[dict[str, Any]]:
-    saved = db.count_companies(conn)
-    return [
-        {
-            **asdict(segment),
-            "saved": saved.get(key, 0),
-            "waiting_for_clay": db.count_waiting_for_clay(conn, key),
-        }
-        for key, segment in sorted(segments.items())
-    ]
-
-
-def _checked(body: SourceRequest, segments: dict[str, Segment]) -> Segment:
-    segment = segment_or_400(segments, body.segment)
-    assert segment is not None
+def _checked(body: SourceRequest, conn: Connection) -> Icp:
+    icp = icp_or_400(conn, body.icp)
+    assert icp is not None
+    if not body.sources:
+        raise HTTPException(400, "Pick at least one source")
+    unknown = [key for key in body.sources if key not in BY_KEY]
+    if unknown:
+        raise HTTPException(400, f"No source called {unknown[0]!r}")
     problem = source.pages_problem(body.pages)
     if problem:
         raise HTTPException(400, sentence(problem))
-    return segment
+    return icp
 
 
-def _apollo_cap(settings: Settings) -> int | None:
-    return settings.caps.get("apollo", {}).get("credits")
+def _credits(body: SourceRequest) -> int:
+    return sum(source.credits_for(key, body.pages) for key in body.sources)
 
 
 @router.post("/source/preview")
@@ -66,15 +59,25 @@ def preview(
     body: SourceRequest,
     conn: Annotated[Connection, Depends(get_conn)],
     settings: Annotated[Settings, Depends(get_settings)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
 ) -> dict[str, Any]:
-    segment = _checked(body, segments)
-    cap = _apollo_cap(settings)
-    return {
-        "text": source.describe(conn, segment, pages=body.pages, cap=cap),
-        "credits": source.credits_for(body.pages),
-        "problem": source.live_problem(os.environ.get("APOLLO_API_KEY", "").strip(), cap),
-    }
+    icp = _checked(body, conn)
+    previews = []
+    for key in body.sources:
+        cap = source.cap_for(settings.caps, key)
+        problem = source.icp_problem(icp, key)
+        if problem is None:
+            api_key = os.environ.get(BY_KEY[key].key_env, "").strip()
+            problem = source.live_problem(key, api_key, cap)
+        previews.append(
+            {
+                "source": key,
+                "label": BY_KEY[key].label,
+                "text": source.describe(conn, icp, key, pages=body.pages, cap=cap),
+                "credits": source.credits_for(key, body.pages),
+                "problem": sentence(problem) if problem else None,
+            }
+        )
+    return {"previews": previews, "credits": _credits(body)}
 
 
 @router.post("/source/run")
@@ -83,28 +86,36 @@ def run(
     request: Request,
     conn: Annotated[Connection, Depends(get_conn)],
     settings: Annotated[Settings, Depends(get_settings)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
 ) -> dict[str, Any]:
-    segment = _checked(body, segments)
-    credits = source.credits_for(body.pages)
+    icp = _checked(body, conn)
+    credits = _credits(body)
     if body.confirm_credits != credits:
         raise HTTPException(
             400, f"Tick “Spend up to {credits} credits” to confirm this run. Nothing was spent."
         )
-    api_key = os.environ.get("APOLLO_API_KEY", "").strip()
-    cap = _apollo_cap(settings)
-    problem = source.live_problem(api_key, cap)
-    if problem:
-        raise HTTPException(400, problem)
-    assert cap is not None
-    with request.app.state.new_http_client() as client:
-        result = source.run_live(
-            conn, segment, client=client, api_key=api_key, cap=cap, pages=body.pages
+    ready = []
+    for key in body.sources:  # check every source before spending on any
+        cap = source.cap_for(settings.caps, key)
+        api_key = os.environ.get(BY_KEY[key].key_env, "").strip()
+        problem = source.icp_problem(icp, key) or source.live_problem(key, api_key, cap)
+        if problem:
+            raise HTTPException(400, sentence(problem))
+        ready.append((key, api_key, cap))
+    runs = []
+    for key, api_key, cap in ready:
+        with request.app.state.new_http_client() as client:
+            result = source.run_live(
+                conn, icp, key, client=client, api_key=api_key, cap=cap, pages=body.pages
+            )
+        used = db.usage_this_month(conn, key, BY_KEY[key].cap_unit)
+        runs.append(
+            {
+                "source": key,
+                "label": BY_KEY[key].label,
+                "summary": source.summarize(result, used=used, cap=cap),
+                "result": asdict(result),
+                "used": used,
+                "cap": cap,
+            }
         )
-    used = db.usage_this_month(conn, source.PROVIDER, source.UNIT)
-    return {
-        "summary": source.summarize(result, used=used, cap=cap),
-        "result": asdict(result),
-        "used": used,
-        "cap": cap,
-    }
+    return {"runs": runs}

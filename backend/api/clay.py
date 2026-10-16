@@ -18,8 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend import db
-from backend.api.deps import get_conn, get_root, get_segments, segment_or_400, sentence
-from backend.config import Segment
+from backend.api.deps import get_conn, get_root, icp_or_400, sentence
 from backend.db import Connection
 from backend.stages import enrich
 
@@ -27,7 +26,7 @@ router = APIRouter(prefix="/clay", tags=["clay"])
 
 
 class ExportRequest(BaseModel):
-    segment: str | None = None
+    icp: str
     rows: int = enrich.DEFAULT_ROWS
 
 
@@ -44,15 +43,16 @@ def export(
     body: ExportRequest,
     conn: Annotated[Connection, Depends(get_conn)],
     root: Annotated[Path, Depends(get_root)],
-    segments: Annotated[dict[str, Segment], Depends(get_segments)],
 ) -> dict[str, Any]:
-    segment_or_400(segments, body.segment)
+    icp_or_400(conn, body.icp)
     if body.rows < 1:
         raise HTTPException(400, "Rows must be at least 1")
-    result = enrich.export_batch(conn, root, body.segment or None, body.rows)
+    result = enrich.export_batch(conn, root, body.icp, body.rows)
     if result is None:
         raise HTTPException(
-            404, "Nothing is waiting for Clay. Find more companies first (Find companies page)."
+            404,
+            f"Nothing from {body.icp} is waiting for Clay. Find more companies first "
+            "(Find companies page).",
         )
     return {"batch_id": result.batch_id, "rows": result.rows, "file": result.path.name}
 

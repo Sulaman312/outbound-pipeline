@@ -50,9 +50,12 @@ Read before doing anything:
 backend/
   cli.py                 commands only, no logic
   app.py                 FastAPI app: /api routes + serves ui/dist (127.0.0.1 only)
-  api/                   routes by resource (overview, source, companies, clay, leads,
+  api/                   routes by resource (overview, icps, source, companies, clay, leads,
                          suppression) + deps.py; routes call stage functions, no logic
   overview.py            what the Pipeline page shows
+  sources.py             SOURCES: where companies come from + the settings an ICP keeps for each
+  icps.py                ICPs (who we target): every check and save
+  seed_icps.py           the ICPs a new database starts with
   config.py              settings.yaml + .env
   db.py                  engine, schema, every SQL statement
   http.py, normalize.py
@@ -61,12 +64,11 @@ backend/
   exports.py             CSV exports
   fields.py              Apollo field names/counts
   integrations/apollo.py
-  stages/source.py       Apollo company sourcing
+  stages/source.py       company sourcing per ICP and source (Apollo built)
   stages/enrich.py       Clay CSV out and in
   stages/verify.py       lead-state rules from Clay's result
 scripts/copy_sqlite_to_db.py
 config/settings.yaml     caps
-config/segments.yaml     targets (M1 → ICPs)
 ui/                      React + Vite, plain CSS
   src/api.js             every fetch to the backend
   src/pages/             one file per sidebar page
@@ -75,6 +77,14 @@ ui/                      React + Vite, plain CSS
 Package install: `pip install -e .`. CLI entry: `outbound`. App: `outbound serve` (build the
 screens once with `npm install && npm run build` in `ui/`). Never commit `ui/dist` or
 `node_modules`.
+
+## Sources and ICPs
+
+- An ICP says who we target; it never decides the source. Each ICP keeps settings per source
+  (`icp_sources`). No niche-specific code anywhere: a new niche is a new ICP.
+- Every source saves into the same companies table (one row per domain, do-not-contact checked)
+  and feeds the same Clay flow. A new source: add it to `backend/sources.py`, write its client in
+  `backend/integrations/`, and its branch in `backend/stages/source.py`.
 
 ## Code style
 

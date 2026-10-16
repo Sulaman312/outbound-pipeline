@@ -10,18 +10,19 @@ from __future__ import annotations
 from typing import Any
 
 from backend import db
-from backend.config import Segment, Settings, key_status
+from backend.config import Settings, key_status
 from backend.db import Connection
 from backend.pipeline import LEAD_STATES, STAGES
 from backend.stages import source
 
 
-def overview(conn: Connection, settings: Settings, segments: dict[str, Segment]) -> dict[str, Any]:
+def overview(conn: Connection, settings: Settings) -> dict[str, Any]:
     """Stages with counts, Apollo credits against the cap, key status, and totals."""
     companies = db.count_companies_by_status(conn)
+    icps = db.list_icps(conn)
     counts = {state: 0 for state in LEAD_STATES}
     counts.update(db.count_leads(conn))
-    # Companies aren't leads yet, so "sourced" counts the companies Apollo found.
+    # Companies aren't leads yet, so "sourced" counts the companies any source found.
     counts["sourced"] = sum(companies.values())
     return {
         "stages": [
@@ -38,7 +39,7 @@ def overview(conn: Connection, settings: Settings, segments: dict[str, Segment])
         "companies": {
             "total": counts["sourced"],
             "by_status": companies,
-            "by_segment": db.count_companies(conn),
+            "by_icp": db.count_companies(conn),
             "waiting_for_clay": db.count_waiting_for_clay(conn),
         },
         "apollo": {
@@ -48,6 +49,6 @@ def overview(conn: Connection, settings: Settings, segments: dict[str, Segment])
         },
         "keys": key_status(),
         "database": db.describe_database(conn.url, settings.root),
-        "segments": len(segments),
+        "icps": {"active": sum(1 for i in icps if i["active"]), "total": len(icps)},
         "do_not_contact": db.count_suppression(conn),
     }

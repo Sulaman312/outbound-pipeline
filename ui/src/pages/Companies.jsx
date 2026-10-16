@@ -1,7 +1,7 @@
 // Every saved company (do-not-contact ones are left out), with search and a CSV download.
 import { useState } from "react";
 import { api } from "../api.js";
-import { Badge, Card, DataTable, Loading, Notice, PageHeader, SegmentSelect, shortDate } from "../components.jsx";
+import { Badge, Card, DataTable, Loading, Notice, PageHeader, IcpSelect, shortDate } from "../components.jsx";
 import { useLoad } from "../useLoad.js";
 
 const COLUMNS = [
@@ -15,17 +15,17 @@ const COLUMNS = [
       </a>
     ),
   },
-  { key: "segment", label: "Segment" },
+  { key: "icp", label: "ICP" },
   { key: "status", label: "Status", render: (r) => <Badge value={r.status} /> },
   { key: "created_at", label: "Found", render: (r) => shortDate(r.created_at) },
 ];
 
 export default function Companies() {
-  const segments = useLoad(api.segments);
-  const [segment, setSegment] = useState("");
+  const icps = useLoad(api.icps);
+  const [icp, setIcp] = useState("");
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
-  const companies = useLoad(() => api.companies({ segment, search }), [segment, search]);
+  const companies = useLoad(() => api.companies({ icp, search }), [icp, search]);
 
   function submit(e) {
     e.preventDefault();
@@ -42,7 +42,7 @@ export default function Companies() {
 
       <Card
         aside={
-          <a className="button secondary" href={api.companiesCsvUrl({ segment, search })}>
+          <a className="button secondary" href={api.companiesCsvUrl({ icp, search })}>
             Download CSV
           </a>
         }
@@ -50,8 +50,8 @@ export default function Companies() {
       >
         <form className="form-row" onSubmit={submit}>
           <label>
-            Segment
-            <SegmentSelect segments={segments.data || []} value={segment} onChange={setSegment} allLabel="All segments" />
+            ICP
+            <IcpSelect icps={icps.data || []} value={icp} onChange={setIcp} allLabel="All ICPs" />
           </label>
           <label className="grow">
             Name or website contains
@@ -75,8 +75,8 @@ export default function Companies() {
             rows={data.rows}
             rowKey={(r) => r.domain}
             empty={
-              search || segment
-                ? "No companies match. Clear the search or pick another segment."
+              search || icp
+                ? "No companies match. Clear the search or pick another ICP."
                 : "No companies yet. Find some on the Find companies page."
             }
           />

@@ -31,12 +31,16 @@ function errorText(data, response) {
   return `The app answered ${response.status} ${response.statusText}.`;
 }
 
-function postJson(path, body) {
+function sendJson(method, path, body) {
   return request(path, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function postJson(path, body) {
+  return sendJson("POST", path, body);
 }
 
 function query(params = {}) {
@@ -56,16 +60,21 @@ function fileForm(file, fields = {}) {
 export const api = {
   overview: () => request("/overview"),
 
-  segments: () => request("/segments"),
-  previewSource: (segment, pages) => postJson("/source/preview", { segment, pages }),
-  runSource: (segment, pages, confirmCredits) =>
-    postJson("/source/run", { segment, pages, confirm_credits: confirmCredits }),
+  sources: () => request("/sources"),
+  icps: () => request("/icps"),
+  createIcp: (icp) => postJson("/icps", icp),
+  updateIcp: (key, icp) => sendJson("PUT", `/icps/${encodeURIComponent(key)}`, icp),
+  setIcpActive: (key, active) => postJson(`/icps/${encodeURIComponent(key)}/active`, { active }),
+
+  previewSource: (icp, sources, pages) => postJson("/source/preview", { icp, sources, pages }),
+  runSource: (icp, sources, pages, confirmCredits) =>
+    postJson("/source/run", { icp, sources, pages, confirm_credits: confirmCredits }),
 
   companies: (params) => request(`/companies${query(params)}`),
   companiesCsvUrl: (params) => `/api/companies.csv${query(params)}`,
 
   clayBatches: () => request("/clay/batches"),
-  clayExport: (segment, rows) => postJson("/clay/export", { segment: segment || null, rows }),
+  clayExport: (icp, rows) => postJson("/clay/export", { icp, rows }),
   clayFileUrl: (batchId) => `/api/clay/batches/${batchId}/file`,
   clayColumns: (file) => request("/clay/columns", { method: "POST", body: fileForm(file) }),
   clayImport: (file, mapping, account, credits) =>

@@ -4,10 +4,12 @@ Cold email pipeline for Arsuno. It targets US companies with 1–20 employees, w
 automation, and outsourced front-end developers.
 
 **What works today: finding companies, then finding the person and email through Clay.**
-- For each target group ("segment"), it asks Apollo for matching US companies.
+- You describe who to target as **ICPs** on the app's ICPs page (shared by both laptops).
+- For each ICP, it asks Apollo for matching companies (Google Maps comes next, in M1b).
 - It saves the usable ones and skips no-website, do-not-contact, and duplicates.
 - It remembers where it stopped, and never goes over the monthly credit cap.
-- It writes the next companies to a file for Clay (two laptops never claim the same company).
+- It writes an ICP's next companies to a file for Clay, with that ICP's people to look for
+  (two laptops never claim the same company).
 - It reads Clay's results back, and sorts every person into a lead state:
   - **verified**: Clay says valid;
   - **needs_check**: catch-all or unknown, re-checked with Instantly next;
@@ -17,7 +19,7 @@ automation, and outsourced front-end developers.
 - The database is Supabase Postgres (shared); tests and a no-`DATABASE_URL` laptop use SQLite.
 - All of it works from a **web app on your own computer** (`outbound serve`), or from commands.
 
-Next: ICPs on an app page (M1), then Instantly verification and campaigns. See
+Next: Google Maps as a second source (M1b), then Instantly verification and campaigns. See
 [docs/plan.md](docs/plan.md).
 
 - [docs/clay-table.md](docs/clay-table.md) — what to click in Clay for each batch
@@ -96,8 +98,8 @@ The first live test spends **1 Apollo credit**. In the app: **Find companies →
 then tick **Spend up to 1 Apollo credit** and **Fetch companies**. Or with commands:
 
 1. **See the setup:** `.venv\Scripts\outbound check`
-2. **Dry run (free):** `.venv\Scripts\outbound source ai_accounting`
-3. **Real run, 1 page:** `.venv\Scripts\outbound source ai_accounting --live`
+2. **Dry run (free):** `.venv\Scripts\outbound source bpa_us_recruit`
+3. **Real run, 1 page:** `.venv\Scripts\outbound source bpa_us_recruit --live`
 4. **Export:** `.venv\Scripts\outbound export`
 5. **Run again** — it should continue at page 2.
 6. **Do-not-contact:** `.venv\Scripts\outbound suppress thatdomain.com --reason "test"`
@@ -111,12 +113,13 @@ then tick **Spend up to 1 Apollo credit** and **Fetch companies**. Or with comma
 | `outbound serve` | Starts the app at http://127.0.0.1:8000 | free |
 | `outbound check` | Config, key status, database host/path, credits, counts | free |
 | `outbound backup` | Every table → `data/backups/<UTC time>.json` | free |
-| `outbound source SEGMENT` | Dry run: shows the Apollo request and its cost | free |
-| `outbound source SEGMENT --live` | Fetches 1 page (100 companies) | 1 credit |
-| `outbound source SEGMENT --live --pages 5` | Same for 5 pages | up to 5 credits |
-| `outbound export` | Companies CSV (`--segment S` for one) | free |
+| `outbound icps` | Lists the ICPs (edit them in the app) | free |
+| `outbound source ICP` | Dry run: shows the Apollo request and its cost | free |
+| `outbound source ICP --live` | Fetches 1 page (100 companies) | 1 credit |
+| `outbound source ICP --live --pages 5` | Same for 5 pages | up to 5 credits |
+| `outbound export` | Companies CSV (`--icp ICP` for one) | free |
 | `outbound export --contacts` | Leads Clay found, with state | free |
-| `outbound clay export --rows 200` | Next companies → Clay file (50 on a trial) | free |
+| `outbound clay export ICP --rows 200` | An ICP's next companies → Clay file (50 on a trial) | free |
 | `outbound clay import FILE --credits 40` | Clay's CSV → leads | free |
 | `outbound suppress acme.com --reason "client"` | Do-not-contact (can't be undone) | free |
 | `outbound fields` | Which fields Apollo sent (names and counts) | free |
@@ -125,13 +128,14 @@ On Windows, put `.venv\Scripts\` in front of each command.
 
 ## Changing who you target
 
-- **Segments** live in `config/segments.yaml` (M1 replaces these with ICPs).
+- **ICPs** are made and edited on the app's **ICPs** page, and stored in the shared database.
+  What each field means: [docs/guide.md](docs/guide.md#icps).
 - **Monthly credit cap** is in `config/settings.yaml` (`caps.apollo.credits`).
 
 ## Where your data is
 
-- **Supabase Postgres** (when `DATABASE_URL` is set) holds companies, leads, batches, suppression,
-  usage and progress. Back it up with `outbound backup` now and then.
+- **Supabase Postgres** (when `DATABASE_URL` is set) holds ICPs, companies, leads, batches,
+  suppression, usage and progress. Back it up with `outbound backup` now and then.
 - **`data/outbound.db`** is used only when `DATABASE_URL` is unset.
 - **`data/exports/`**, **`data/clay/`**, **`data/backups/`** stay on disk and are gitignored.
 

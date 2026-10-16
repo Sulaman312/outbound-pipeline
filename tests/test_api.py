@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fakes import FakeApollo, no_network_client, org, page
+from fakes import FakeApollo, icp_data, no_network_client, org, page
 from fastapi.testclient import TestClient
 
 from backend import db
@@ -27,7 +27,7 @@ def client(project: Path) -> Iterator[TestClient]:
         yield test_client
 
 
-def add_companies(project: Path, count: int, segment: str = "ai_accounting") -> None:
+def add_companies(project: Path, count: int, icp: str = "bpa_us_recruit") -> None:
     conn = db.connect(project)
     with conn:
         for i in range(1, count + 1):
@@ -38,7 +38,7 @@ def add_companies(project: Path, count: int, segment: str = "ai_accounting") -> 
                     "name": f"Firm {i}",
                     "source": "apollo",
                     "source_id": f"org{i}",
-                    "segment": segment,
+                    "icp": icp,
                 },
             )
     conn.close()
@@ -77,7 +77,7 @@ def test_overview_follows_the_stage_list(client: TestClient) -> None:
 
 def test_overview_counts_companies_and_leads(client: TestClient, project: Path) -> None:
     add_companies(project, 3)
-    client.post("/api/clay/export", json={"rows": 3})
+    client.post("/api/clay/export", json={"icp": ICP, "rows": 3})
     client.post(
         "/api/clay/import",
         files={"file": ("clay.csv", clay_file(CLAY_ROWS))},
@@ -102,34 +102,86 @@ def test_overview_shows_keys_as_set_never_their_values(
     assert "postgresql" not in response.text
 
 
-# --- segments and source ------------------------------------------------------------------------
+# --- ICPs and sources ---------------------------------------------------------------------------
+
+ICP = "bpa_us_recruit"  # a starting ICP that is active and has no job-post signal
 
 
-def test_segments(client: TestClient, project: Path) -> None:
+def test_sources_list_every_source_with_its_fields(client: TestClient) -> None:
+    data = {s["key"]: s for s in client.get("/api/sources").json()}
+    assert data["apollo"]["built"] is True and data["google_maps"]["built"] is False
+    assert [f["key"] for f in data["google_maps"]["fields"]] == ["queries", "cities"]
+
+
+def test_icps_list_with_counts(client: TestClient, project: Path) -> None:
     add_companies(project, 2)
-    data = client.get("/api/segments").json()
-    by_key = {s["key"]: s for s in data}
-    assert set(by_key) == {"ai_accounting", "frontend_agencies"}
-    assert by_key["ai_accounting"]["saved"] == 2
-    assert by_key["ai_accounting"]["waiting_for_clay"] == 2
-    assert by_key["ai_accounting"]["keywords"] == ["accounting", "bookkeeping"]
+    rows = client.get("/api/icps").json()
+    by_key = {r["key"]: r for r in rows}
+    assert rows[0]["active"] is True and rows[-1]["active"] is False  # active first
+    assert (by_key[ICP]["saved"], by_key[ICP]["waiting_for_clay"]) == (2, 2)
+    assert by_key[ICP]["sources"]["apollo"]["hq_locations"] == ["Texas", "Florida"]
+
+
+def test_icp_create_edit_deactivate(client: TestClient) -> None:
+    created = client.post("/api/icps", json=icp_data("vets_us"))
+    assert created.status_code == 200 and created.json()["key"] == "vets_us"
+    again = client.post("/api/icps", json=icp_data("vets_us"))
+    assert again.status_code == 400 and "already an ICP" in again.json()["detail"]
+
+    changed = client.put("/api/icps/vets_us", json=icp_data("vets_us", name="US vets"))
+    assert changed.json()["name"] == "US vets"
+    assert client.get("/api/icps/vets_us").json()["name"] == "US vets"
+
+    off = client.post("/api/icps/vets_us/active", json={"active": False})
+    assert off.json()["active"] is False
+    assert client.put("/api/icps/nope", json=icp_data("nope")).status_code == 404
+    assert client.get("/api/icps/nope").status_code == 404
+
+
+def test_icp_errors_are_plain_sentences(client: TestClient) -> None:
+    bad = icp_data(sources={"apollo": {"hq_locations": ["Texas"], "employee_ranges": ["1-10"]}})
+    response = client.post("/api/icps", json=bad)
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == 'Apollo: Headcount ranges: "1-10" must look like "1,10" (smallest, largest)'
+    )
+
+
+def test_icps_are_never_deleted(client: TestClient) -> None:
+    assert client.delete(f"/api/icps/{ICP}").status_code == 405
 
 
 def test_preview_is_free_and_offline(client: TestClient) -> None:
-    response = client.post("/api/source/preview", json={"segment": "ai_accounting", "pages": 2})
+    response = client.post("/api/source/preview", json={"icp": ICP, "pages": 2})
     assert response.status_code == 200
     data = response.json()
-    assert "pages:    1 to 2" in data["text"]
     assert data["credits"] == 2
-    assert "APOLLO_API_KEY" in data["problem"]
+    [apollo_preview] = data["previews"]
+    assert "pages:    1 to 2" in apollo_preview["text"]
+    assert "organization_locations[] = Texas" in apollo_preview["text"]
+    assert "APOLLO_API_KEY" in apollo_preview["problem"]
+
+
+def test_preview_shows_why_a_source_or_icp_cant_run(client: TestClient) -> None:
+    data = client.post(
+        "/api/source/preview", json={"icp": ICP, "sources": ["apollo", "google_maps"]}
+    ).json()
+    maps = data["previews"][1]
+    assert "isn't built yet" in maps["problem"]
+    signal = client.post("/api/source/preview", json={"icp": "dev_us_signal"}).json()
+    assert "job-post signal" in signal["previews"][0]["problem"]
+    assert "NOT SENT" in signal["previews"][0]["text"]
 
 
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ({"segment": "nope", "pages": 1}, "No segment called"),
-        ({"segment": "ai_accounting", "pages": 0}, "Pages must be between"),
-        ({"segment": "ai_accounting", "pages": 51}, "Pages must be between"),
+        ({"icp": "nope", "pages": 1}, 'No ICP called "nope"'),
+        ({"icp": ICP, "pages": 0}, "Pages must be between"),
+        ({"icp": ICP, "pages": 51}, "Pages must be between"),
+        ({"icp": ICP, "sources": []}, "Pick at least one source"),
+        ({"icp": ICP, "sources": ["yelp"]}, "No source called 'yelp'"),
     ],
 )
 def test_preview_rejects_bad_input(client: TestClient, body: dict, message: str) -> None:
@@ -144,8 +196,7 @@ def test_run_needs_the_exact_credits_confirmed(
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     for confirm in (0, 1, 3):  # 2 pages can spend 2 credits
         response = client.post(
-            "/api/source/run",
-            json={"segment": "ai_accounting", "pages": 2, "confirm_credits": confirm},
+            "/api/source/run", json={"icp": ICP, "pages": 2, "confirm_credits": confirm}
         )
         assert response.status_code == 400
         assert "Spend up to 2 credits" in response.json()["detail"]
@@ -153,9 +204,7 @@ def test_run_needs_the_exact_credits_confirmed(
 
 
 def test_run_needs_a_key(client: TestClient) -> None:
-    response = client.post(
-        "/api/source/run", json={"segment": "ai_accounting", "pages": 1, "confirm_credits": 1}
-    )
+    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
     assert response.status_code == 400
     assert "APOLLO_API_KEY isn't set" in response.json()["detail"]
 
@@ -165,27 +214,46 @@ def test_run_needs_a_cap(
 ) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     (project / "config" / "settings.yaml").write_text("caps:\n  other:\n    x: 1\n")
-    response = client.post(
-        "/api/source/run", json={"segment": "ai_accounting", "pages": 1, "confirm_credits": 1}
-    )
+    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
     assert response.status_code == 400
     assert "caps.apollo.credits" in response.json()["detail"]
+
+
+def test_run_refuses_an_unbuilt_source_before_spending(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APOLLO_API_KEY", "test-key")
+    response = client.post(
+        "/api/source/run",
+        json={"icp": ICP, "sources": ["apollo", "google_maps"], "pages": 1, "confirm_credits": 1},
+    )
+    assert response.status_code == 400 and "isn't built yet" in response.json()["detail"]
+    assert client.get("/api/overview").json()["apollo"]["used"] == 0
+
+
+def test_run_refuses_an_inactive_icp(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APOLLO_API_KEY", "test-key")
+    response = client.post(
+        "/api/source/run", json={"icp": "ai_accounting", "pages": 1, "confirm_credits": 1}
+    )
+    assert response.status_code == 400 and "inactive" in response.json()["detail"]
 
 
 def test_run_fetches_and_saves(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     fake = FakeApollo((200, page([org(1), org(2), org(3, domain="", website_url=None)])))
     client.app.state.new_http_client = fake.client
-    response = client.post(
-        "/api/source/run", json={"segment": "ai_accounting", "pages": 1, "confirm_credits": 1}
-    )
+    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
     assert response.status_code == 200
-    data = response.json()
-    assert data["result"]["saved"] == 2 and data["result"]["no_domain"] == 1
-    assert data["used"] == 1 and data["cap"] == 10
-    assert "saved (new)          2" in data["summary"]
+    [run] = response.json()["runs"]
+    assert run["result"]["saved"] == 2 and run["result"]["no_domain"] == 1
+    assert run["used"] == 1 and run["cap"] == 10
+    assert "saved (new)          2" in run["summary"]
+    assert "Apollo reports about 500 matching companies" in run["summary"]
     assert fake.pages_requested() == [1]
-    assert client.get("/api/companies").json()["total"] == 2
+    assert fake.requests[0].url.params.get_list("organization_locations[]") == ["Texas", "Florida"]
+    rows = client.get("/api/companies", params={"icp": ICP}).json()["rows"]
+    assert {r["icp"] for r in rows} == {ICP} and len(rows) == 2
 
 
 def test_run_never_goes_over_the_cap(
@@ -196,12 +264,10 @@ def test_run_never_goes_over_the_cap(
     with conn:
         db.add_usage(conn, "apollo", "credits", 10)
     conn.close()
-    response = client.post(
-        "/api/source/run", json={"segment": "ai_accounting", "pages": 1, "confirm_credits": 1}
-    )
+    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
     assert response.status_code == 200  # no_network_client: any request would fail the test
-    assert response.json()["result"]["stopped_by_cap"] is True
-    assert response.json()["used"] == 10
+    [run] = response.json()["runs"]
+    assert run["result"]["stopped_by_cap"] is True and run["used"] == 10
 
 
 # --- companies ----------------------------------------------------------------------------------
@@ -213,10 +279,8 @@ def test_companies_list_and_search(client: TestClient, project: Path) -> None:
     found = client.get("/api/companies", params={"search": "FIRM1"}).json()
     assert sorted(r["domain"] for r in found["rows"]) == ["firm1.com", "firm10.com", "firm11.com",
                                                           "firm12.com"]  # fmt: skip
-    assert (
-        client.get("/api/companies", params={"segment": "frontend_agencies"}).json()["total"] == 0
-    )
-    assert client.get("/api/companies", params={"segment": "nope"}).status_code == 400
+    assert client.get("/api/companies", params={"icp": "dev_us_pain"}).json()["total"] == 0
+    assert client.get("/api/companies", params={"icp": "nope"}).status_code == 400
 
 
 def test_companies_csv(client: TestClient, project: Path) -> None:
@@ -234,7 +298,7 @@ def test_companies_csv(client: TestClient, project: Path) -> None:
 
 def test_clay_export_and_download(client: TestClient, project: Path) -> None:
     add_companies(project, 3)
-    response = client.post("/api/clay/export", json={"segment": "ai_accounting", "rows": 2})
+    response = client.post("/api/clay/export", json={"icp": ICP, "rows": 2})
     assert response.status_code == 200
     batch = response.json()
     assert batch["rows"] == 2
@@ -248,14 +312,15 @@ def test_clay_export_and_download(client: TestClient, project: Path) -> None:
 
 
 def test_clay_export_with_nothing_waiting(client: TestClient) -> None:
-    response = client.post("/api/clay/export", json={})
+    response = client.post("/api/clay/export", json={"icp": ICP})
     assert response.status_code == 404
-    assert "Nothing is waiting for Clay" in response.json()["detail"]
+    assert "Nothing from bpa_us_recruit is waiting for Clay" in response.json()["detail"]
 
 
 def test_clay_export_bad_input(client: TestClient) -> None:
-    assert client.post("/api/clay/export", json={"rows": 0}).status_code == 400
-    assert client.post("/api/clay/export", json={"segment": "nope"}).status_code == 400
+    assert client.post("/api/clay/export", json={"icp": ICP, "rows": 0}).status_code == 400
+    assert client.post("/api/clay/export", json={"icp": "nope"}).status_code == 400
+    assert client.post("/api/clay/export", json={"rows": 5}).status_code == 422  # ICP required
 
 
 def test_clay_download_unknown_batch(client: TestClient) -> None:
@@ -280,7 +345,7 @@ def test_clay_columns_rejects_an_empty_file(client: TestClient) -> None:
 
 def test_clay_import(client: TestClient, project: Path) -> None:
     add_companies(project, 3)
-    batch = client.post("/api/clay/export", json={"rows": 3}).json()
+    batch = client.post("/api/clay/export", json={"icp": ICP, "rows": 3}).json()
     mapping = {"domain": "Company Domain", "email": "Work Email", "email_status": "Validate Email",
                "first_name": "First Name", "title": ""}  # fmt: skip
     response = client.post(
@@ -330,7 +395,7 @@ def test_clay_import_rejects_mapping_that_is_not_json(client: TestClient) -> Non
 
 def test_leads_by_state_and_csv(client: TestClient, project: Path) -> None:
     add_companies(project, 3)
-    client.post("/api/clay/export", json={"rows": 3})
+    client.post("/api/clay/export", json={"icp": ICP, "rows": 3})
     client.post(
         "/api/clay/import",
         files={"file": ("clay.csv", clay_file(CLAY_ROWS))},
@@ -415,4 +480,4 @@ def test_built_ui_is_served(project: Path) -> None:
     (dist / "index.html").write_text("<h1>outbound</h1>", encoding="utf-8")
     with TestClient(create_app(project, ui_dist=dist), base_url=LOCAL) as test_client:
         assert "outbound" in test_client.get("/").text
-        assert test_client.get("/api/segments").status_code == 200
+        assert test_client.get("/api/icps").status_code == 200

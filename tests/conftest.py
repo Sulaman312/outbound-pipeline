@@ -15,23 +15,9 @@ caps:
     credits: 10
 """
 
-SEGMENTS = """\
-segments:
-  ai_accounting:
-    offer: ai_automation
-    description: US accounting firms, 1-20 staff
-    employees: ["1,20"]
-    locations: ["United States"]
-    keywords: ["accounting", "bookkeeping"]
-  frontend_agencies:
-    offer: frontend
-    description: US web agencies, 1-20 staff
-    employees: ["1,10", "11,20"]
-    locations: ["United States"]
-    keywords: []
-"""
-
 _WIPE_ORDER = (
+    "icp_sources",
+    "icps",
     "leads",
     "batches",
     "companies",
@@ -69,11 +55,12 @@ def wipe_shared_postgres() -> None:
 
 
 def _wipe(url: str) -> None:
-    """Empty every table and restart the id counters, so each test sees batch 1, company 1."""
+    """Back to a freshly migrated database: empty tables, id counters at 1, starting ICPs."""
     conn = db.connect(Path.cwd(), url=url)
     try:
         with conn:
             conn.execute(f"TRUNCATE {', '.join(_WIPE_ORDER)} RESTART IDENTITY CASCADE")
+            db.seed_starting_icps(conn)
     finally:
         conn.close()
 
@@ -83,5 +70,4 @@ def project(tmp_path: Path) -> Path:
     """A minimal valid project folder."""
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "settings.yaml").write_text(SETTINGS, encoding="utf-8")
-    (tmp_path / "config" / "segments.yaml").write_text(SEGMENTS, encoding="utf-8")
     return tmp_path

@@ -2,14 +2,15 @@
 
 Commands:
   outbound check                         config, keys, budget, what's saved
-  outbound source SEGMENT [--pages N]    dry run: shows the Apollo request and its cost
-  outbound source SEGMENT --live         runs it for real (spends Apollo credits)
-  outbound export [--segment S]          writes saved companies to a CSV file
+  outbound icps                          the ICPs (who we target); edit them in the app
+  outbound source ICP [--pages N]        dry run: shows the Apollo request and its cost
+  outbound source ICP --live             runs it for real (spends Apollo credits)
+  outbound export [--icp ICP]            writes saved companies to a CSV file
   outbound export --contacts             writes the people Clay found to a CSV file
-  outbound clay export [--rows N]        writes the next companies to a CSV to upload to Clay
+  outbound clay export ICP [--rows N]    writes one ICP's next companies to a CSV for Clay
   outbound clay import FILE              reads the CSV you downloaded from Clay
   outbound suppress VALUE --reason TEXT  adds a domain or email to the do-not-contact list
-  outbound fields [--segment S]          which fields Apollo sent (names and counts, no values)
+  outbound fields [--icp ICP]            which fields Apollo sent (names and counts, no values)
   outbound backup                        writes every table to data/backups/<UTC time>.json
   outbound serve                         starts the app at http://127.0.0.1:8000
 """
@@ -27,18 +28,12 @@ from pathlib import Path
 
 import uvicorn
 
-from backend import app, db, exports, fields, suppression
-from backend.config import (
-    ConfigError,
-    Segment,
-    Settings,
-    key_status,
-    load_env,
-    load_segments,
-    load_settings,
-)
+from backend import app, db, exports, fields, icps, suppression
+from backend.config import ConfigError, Settings, key_status, load_env, load_settings
 from backend.db import Connection
 from backend.http import new_client
+from backend.icps import Icp
+from backend.sources import BY_KEY, SOURCES
 from backend.stages import enrich, source
 
 
@@ -49,19 +44,23 @@ def _shown(path: Path, root: Path) -> str:
         return str(path)
 
 
-def _apollo_cap(settings: Settings) -> int | None:
-    return settings.caps.get("apollo", {}).get("credits")
+def _icp(conn: Connection, key: str) -> Icp | None:
+    """The ICP called `key`, or None after printing which ones exist."""
+    icp = icps.get(conn, key)
+    if icp is None:
+        names = ", ".join(i.key for i in icps.list_all(conn) if i.active)
+        print(f"error: no ICP called {key!r}. Active ICPs: {names or 'none'}", file=sys.stderr)
+    return icp
 
 
 def cmd_check(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
     month = db.current_month()
     saved = db.count_companies(conn)
-    print("config:   ok (config/settings.yaml, config/segments.yaml)")
+    print("config:   ok (config/settings.yaml)")
     print(f"database: {db.describe_database(conn.url, settings.root)}")
     print("keys:")
     for name, is_set in key_status().items():
@@ -71,10 +70,12 @@ def cmd_check(
         for unit in sorted(settings.caps[provider]):
             used = db.usage_this_month(conn, provider, unit)
             print(f"  {provider} {unit}  {used} / {settings.caps[provider][unit]}")
-    print("segments:")
-    width = max(len(key) for key in segments)
-    for key in sorted(segments):
-        print(f"  {key.ljust(width)}  {segments[key].offer.ljust(13)}  {saved.get(key, 0)} saved")
+    print("ICPs (edit them on the app's ICPs page):")
+    all_icps = icps.list_all(conn)
+    width = max((len(i.key) for i in all_icps), default=0)
+    for icp in all_icps:
+        state = "active  " if icp.active else "inactive"
+        print(f"  {icp.key.ljust(width)}  {state}  {saved.get(icp.key, 0)} saved")
     print(f"waiting for Clay: {db.count_waiting_for_clay(conn)} companies")
     leads = db.count_leads(conn)
     print(
@@ -90,29 +91,29 @@ def cmd_check(
 def cmd_source(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
-    segment = segments.get(args.segment)
-    if segment is None:
-        print(
-            f"error: no segment called {args.segment!r}. Choose one of: {', '.join(sorted(segments))}",
-            file=sys.stderr,
-        )
+    icp = _icp(conn, args.icp)
+    if icp is None:
         return 2
     problem = source.pages_problem(args.pages)
     if problem:
         print(f"error: --{problem}", file=sys.stderr)
         return 2
-    cap = _apollo_cap(settings)
+    problem = source.icp_problem(icp, args.source)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
+    cap = source.cap_for(settings.caps, args.source)
+    label = BY_KEY[args.source].label
 
     if not args.live:
-        print("DRY RUN: nothing is sent to Apollo. Add --live to run it for real.\n")
-        print(source.describe(conn, segment, pages=args.pages, cap=cap))
+        print(f"DRY RUN: nothing is sent to {label}. Add --live to run it for real.\n")
+        print(source.describe(conn, icp, args.source, pages=args.pages, cap=cap))
         return 0
 
-    api_key = os.environ.get("APOLLO_API_KEY", "").strip()
-    problem = source.live_problem(api_key, cap)
+    api_key = os.environ.get(BY_KEY[args.source].key_env, "").strip()
+    problem = source.live_problem(args.source, api_key, cap)
     if problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2
@@ -120,9 +121,9 @@ def cmd_source(
 
     with new_client() as client:
         result = source.run_live(
-            conn, segment, client=client, api_key=api_key, cap=cap, pages=args.pages
+            conn, icp, args.source, client=client, api_key=api_key, cap=cap, pages=args.pages
         )
-    used = db.usage_this_month(conn, source.PROVIDER, source.UNIT)
+    used = db.usage_this_month(conn, args.source, BY_KEY[args.source].cap_unit)
     print(source.summarize(result, used=used, cap=cap))
     return 1 if result.error else 0
 
@@ -130,18 +131,16 @@ def cmd_source(
 def cmd_export(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
-    if args.segment and args.segment not in segments:
-        print(f"error: no segment called {args.segment!r}", file=sys.stderr)
+    if args.icp and _icp(conn, args.icp) is None:
         return 2
     kind = "contacts" if args.contacts else "companies"
     path = Path(args.out).resolve() if args.out else exports.default_path(settings.root, kind)
     if args.contacts:
         count = exports.export_leads(conn, path)
     else:
-        count = exports.export_companies(conn, path, args.segment)
+        count = exports.export_companies(conn, path, args.icp)
     print(f"wrote {count} {kind} to {_shown(path, settings.root)}")
     return 0
 
@@ -149,18 +148,16 @@ def cmd_export(
 def cmd_clay_export(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
-    if args.segment and args.segment not in segments:
-        print(f"error: no segment called {args.segment!r}", file=sys.stderr)
+    if _icp(conn, args.icp) is None:
         return 2
     if args.rows < 1:
         print("error: --rows must be at least 1", file=sys.stderr)
         return 2
-    result = enrich.export_batch(conn, settings.root, args.segment, args.rows)
+    result = enrich.export_batch(conn, settings.root, args.icp, args.rows)
     if result is None:
-        print("Nothing waiting for Clay. Find more companies first (outbound source ...).")
+        print(f"Nothing from {args.icp} is waiting for Clay. Find more companies first.")
         return 0
     print(
         f"wrote {result.rows} companies to {_shown(result.path, settings.root)} (batch {result.batch_id})"
@@ -172,7 +169,6 @@ def cmd_clay_export(
 def cmd_clay_import(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
     path = Path(args.file)
@@ -199,7 +195,6 @@ def cmd_clay_import(
 def cmd_suppress(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
     try:
@@ -211,13 +206,27 @@ def cmd_suppress(
     return 0
 
 
+def cmd_icps(
+    args: argparse.Namespace,
+    settings: Settings,
+    conn: Connection,
+) -> int:
+    for icp in icps.summaries(conn):
+        state = "active" if icp["active"] else "inactive"
+        sources = ", ".join(sorted(icp["sources"])) or "no source settings"
+        print(f"{icp['key']}  ({state}; {sources})")
+        print(f"  {icp['name']}")
+        print(f"  {icp['saved']} companies saved, {icp['waiting_for_clay']} waiting for Clay")
+    print("Create and edit ICPs on the app's ICPs page (outbound serve).")
+    return 0
+
+
 def cmd_fields(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
-    total, counts = fields.field_counts(conn, args.segment)
+    total, counts = fields.field_counts(conn, args.icp)
     print(fields.describe(total, counts))
     return 0
 
@@ -225,7 +234,6 @@ def cmd_fields(
 def cmd_backup(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection,
 ) -> int:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -249,7 +257,6 @@ Then run `outbound serve` again. Starting only the /api routes for now (enough f
 def cmd_serve(
     args: argparse.Namespace,
     settings: Settings,
-    segments: dict[str, Segment],
     conn: Connection | None,
 ) -> int:
     url = f"http://127.0.0.1:{args.port}"
@@ -273,16 +280,25 @@ def build_parser() -> argparse.ArgumentParser:
     check = commands.add_parser("check", help="show config, keys, budget and what's saved")
     check.set_defaults(func=cmd_check)
 
-    src = commands.add_parser("source", help="find companies for a segment (dry run unless --live)")
-    src.add_argument("segment", help="a segment name from config/segments.yaml")
+    icps_cmd = commands.add_parser("icps", help="list the ICPs (who we target)")
+    icps_cmd.set_defaults(func=cmd_icps)
+
+    src = commands.add_parser("source", help="find companies for an ICP (dry run unless --live)")
+    src.add_argument("icp", help="an ICP key, like dev_us_pain (see `outbound icps`)")
+    src.add_argument(
+        "--source",
+        default="apollo",
+        choices=[s.key for s in SOURCES],
+        help="where to look (default apollo)",
+    )
     src.add_argument(
         "--pages", type=int, default=1, help="pages of 100 companies to fetch (default 1)"
     )
-    src.add_argument("--live", action="store_true", help="really call Apollo and spend credits")
+    src.add_argument("--live", action="store_true", help="really call the source and spend credits")
     src.set_defaults(func=cmd_source)
 
     exp = commands.add_parser("export", help="write saved companies to a CSV file")
-    exp.add_argument("--segment", help="only this segment")
+    exp.add_argument("--icp", help="only this ICP")
     exp.add_argument("--contacts", action="store_true", help="the people Clay found, not companies")
     exp.add_argument("--out", help="file to write (default: data/exports/<kind>_<time>.csv)")
     exp.set_defaults(func=cmd_export)
@@ -291,8 +307,10 @@ def build_parser() -> argparse.ArgumentParser:
         "clay", help="send companies to Clay, and read Clay's results back"
     )
     clay_steps = clay_cmd.add_subparsers(dest="clay_command", required=True)
-    clay_out = clay_steps.add_parser("export", help="write the next companies to a CSV for Clay")
-    clay_out.add_argument("--segment", help="only this segment")
+    clay_out = clay_steps.add_parser(
+        "export", help="write one ICP's next companies to a CSV for Clay"
+    )
+    clay_out.add_argument("icp", help="the ICP whose companies go into this file")
     clay_out.add_argument(
         "--rows",
         type=int,
@@ -312,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     sup.set_defaults(func=cmd_suppress)
 
     fld = commands.add_parser("fields", help="which fields Apollo sent (names and counts only)")
-    fld.add_argument("--segment", help="only this segment")
+    fld.add_argument("--icp", help="only this ICP")
     fld.set_defaults(func=cmd_fields)
 
     backup = commands.add_parser("backup", help="write every table to data/backups/<UTC time>.json")
@@ -331,14 +349,13 @@ def main(argv: list[str] | None = None) -> int:
     load_env(root / ".env")
     try:
         settings = load_settings(root)
-        segments = load_segments(root)
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
     if not getattr(args, "needs_db", True):  # serve opens one connection per request instead
-        return args.func(args, settings, segments, None)
+        return args.func(args, settings, None)
     conn = db.connect(settings.root)
     try:
-        return args.func(args, settings, segments, conn)
+        return args.func(args, settings, conn)
     finally:
         conn.close()

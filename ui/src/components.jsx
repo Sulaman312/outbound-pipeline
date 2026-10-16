@@ -102,13 +102,16 @@ export function shortDate(text) {
   return text ? text.replace("T", " ").replace(/:\d\dZ$/, " UTC") : "";
 }
 
-export function SegmentSelect({ segments, value, onChange, allLabel }) {
+// Pick an ICP. Inactive ones are marked, and left out when `activeOnly` is set.
+export function IcpSelect({ icps, value, onChange, allLabel, activeOnly }) {
+  const shown = activeOnly ? icps.filter((i) => i.active) : icps;
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       {allLabel && <option value="">{allLabel}</option>}
-      {segments.map((s) => (
-        <option key={s.key} value={s.key}>
-          {s.key} ({s.offer})
+      {shown.map((i) => (
+        <option key={i.key} value={i.key}>
+          {i.key}
+          {i.active ? "" : " (inactive)"} — {i.name}
         </option>
       ))}
     </select>

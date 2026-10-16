@@ -70,11 +70,13 @@ code { background: #f0f2f5; padding: 1px 5px; border-radius: 4px; font-size: 0.9
 label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 500; }
 label.grow { flex: 1; min-width: 220px; }
 label.narrow input { width: 110px; }
-input, select {
+input, select, textarea {
   font: inherit; color: var(--text); padding: 7px 10px; border: 1px solid #cfd5dd;
   border-radius: 6px; background: #fff; min-height: 36px;
 }
-input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+textarea { resize: vertical; line-height: 1.4; }
+input:disabled { background: #f3f4f6; color: var(--muted); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 input[type="file"] { padding: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 15px; color: var(--text); }
 label.check input { width: 18px; height: 18px; min-height: 0; }
@@ -143,7 +145,7 @@ tbody tr:hover td { background: #fafbfd; }
 
 /* misc */
 .output { background: #f8f9fb; border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px;
-  font-size: 13px; overflow-x: auto; white-space: pre; margin: 8px 0; }
+  font-size: 13px; overflow-x: auto; white-space: pre-wrap; margin: 8px 0; }
 .facts { margin: 0; }
 .fact-row { display: flex; gap: 16px; padding: 6px 0; border-bottom: 1px solid #eef0f3; }
 .fact-row:last-child { border-bottom: none; }
@@ -154,3 +156,16 @@ tbody tr:hover td { background: #fafbfd; }
 .mapping { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; margin: 8px 0 14px; }
 details { margin-top: 8px; }
 summary { cursor: pointer; color: var(--accent); }
+
+/* ICPs */
+.help { font-weight: 400; font-size: 12px; color: var(--muted); }
+.small { font-size: 12px; }
+.muted.small { margin: 2px 0 0; }
+.sub { font-size: 14px; margin: 14px 0 4px; }
+.sources { display: flex; flex-wrap: wrap; gap: 18px; margin: 4px 0 10px; }
+.source-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; }
+.row-actions { display: flex; gap: 6px; margin-top: 6px; }
+button.small { padding: 3px 10px; min-height: 0; font-size: 13px; }
+.filters { margin: 6px 0 2px; padding: 8px 12px; background: var(--accent-soft); border-radius: 6px; }
+.filters div { margin: 2px 0; }
+.badge + .badge { margin-left: 4px; }

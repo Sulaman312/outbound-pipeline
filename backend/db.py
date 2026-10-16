@@ -5,6 +5,7 @@ All SQL stays here. Other modules call these functions and never write SQL.
 
 DATABASE_URL from .env (Postgres via psycopg 3). If unset, sqlite under data/.
 SQL must run on both: ON CONFLICT, RETURNING, COUNT(*) FILTER. No PRAGMA.
+Lists (ICP settings) are stored as JSON text, so both databases read them the same way.
 
 Functions never commit. Callers wrap one unit of work in `with conn:`, which
 commits when the block succeeds and rolls back when it fails.
@@ -12,6 +13,7 @@ commits when the block succeeds and rolls back when it fails.
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,10 +24,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection as SaConnection
 from sqlalchemy.engine import CursorResult, Engine, RowMapping
 
-SCHEMA_VERSION = 1
+from backend import seed_icps
+
+SCHEMA_VERSION = 2
 
 TABLES: tuple[str, ...] = (
     "schema_version",
+    "icps",
+    "icp_sources",
     "companies",
     "suppression",
     "usage",
@@ -43,7 +49,7 @@ def _pk(dialect: str) -> str:
 
 
 def _schema_statements(dialect: str) -> tuple[str, ...]:
-    """Version 1: today's tables. contacts -> leads; decision/reason -> state/state_reason."""
+    """Version 1, as first released. Never edit it: later versions change it in a migration."""
     pk = _pk(dialect)
     return (
         """
@@ -137,7 +143,7 @@ COMPANY_COLUMNS = (
     "name",
     "source",
     "source_id",
-    "segment",
+    "icp",
     "city",
     "state",
     "country",
@@ -230,6 +236,7 @@ class Connection:
 
 
 _engines: dict[str, Engine] = {}
+_ready: set[str] = set()  # databases whose schema this process already checked
 
 
 def _normalize_url(url: str) -> str:
@@ -276,14 +283,24 @@ def connect(root: Path, *, url: str | None = None) -> Connection:
         _engines[resolved] = create_engine(resolved, pool_pre_ping=True)
     sa_conn = _engines[resolved].connect()
     conn = Connection(sa_conn, resolved)
-    with conn:
-        init_schema(conn)
+    if resolved not in _ready:  # the app connects on every request: check the schema once
+        try:
+            with conn:
+                init_schema(conn)
+        except BaseException:
+            conn.close()
+            raise
+        _ready.add(resolved)
     return conn
 
 
 def init_schema(conn: Connection) -> None:
-    """Create a new database, or refuse one from newer code."""
+    """Create a new database, bring an older one up to date, or refuse one from newer code."""
     version = _read_schema_version(conn)
+    if version < SCHEMA_VERSION and conn.dialect == "postgresql" and version > 0:
+        # Two laptops starting new code at once: the second waits here, then sees the new version.
+        conn.execute("LOCK TABLE schema_version IN ACCESS EXCLUSIVE MODE")
+        version = _read_schema_version(conn)
     if version > SCHEMA_VERSION:
         raise RuntimeError(
             f"database schema is version {version}, this code knows {SCHEMA_VERSION}. Update the code."
@@ -293,9 +310,96 @@ def init_schema(conn: Connection) -> None:
             conn.execute(statement)
         conn.execute("INSERT INTO schema_version (version) VALUES (:version)", {"version": 1})
         version = 1
+    if version == 1:
+        _migrate_to_2(conn)
     if conn.dialect == "postgresql":
         _enable_rls(conn)
-    # Future versions: run migrations here, then UPDATE schema_version.
+
+
+def _migrate_to_2(conn: Connection) -> None:
+    """Version 2: ICPs (who we target) with settings per source; segment -> icp everywhere."""
+    conn.execute(
+        """
+        CREATE TABLE icps (
+            key               TEXT PRIMARY KEY,
+            name              TEXT NOT NULL,
+            description       TEXT NOT NULL DEFAULT '',
+            offer             TEXT NOT NULL DEFAULT '',
+            country           TEXT NOT NULL DEFAULT '',
+            active            INTEGER NOT NULL DEFAULT 1,
+            person_titles     TEXT NOT NULL DEFAULT '[]',
+            person_locations  TEXT NOT NULL DEFAULT '[]',
+            exclude_notes     TEXT NOT NULL DEFAULT '',
+            target_leads      INTEGER NOT NULL DEFAULT 0,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE icp_sources (
+            icp       TEXT NOT NULL REFERENCES icps(key),
+            source    TEXT NOT NULL,
+            settings  TEXT NOT NULL,
+            PRIMARY KEY (icp, source)
+        )
+        """
+    )
+    conn.execute("ALTER TABLE companies RENAME COLUMN segment TO icp")
+    conn.execute("ALTER TABLE batches RENAME COLUMN segment TO icp")
+    # Progress is now per ICP and per source. Copy, then swap, so no index name clashes.
+    conn.execute(
+        """
+        CREATE TABLE sourcing_progress_new (
+            icp            TEXT NOT NULL,
+            source         TEXT NOT NULL,
+            filters_hash   TEXT NOT NULL,
+            next_page      INTEGER NOT NULL,
+            total_entries  INTEGER,
+            exhausted      INTEGER NOT NULL DEFAULT 0,
+            updated_at     TEXT NOT NULL,
+            PRIMARY KEY (icp, source)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO sourcing_progress_new
+            (icp, source, filters_hash, next_page, total_entries, exhausted, updated_at)
+        SELECT segment, 'apollo', filters_hash, next_page, total_entries, exhausted, updated_at
+        FROM sourcing_progress
+        """
+    )
+    conn.execute("DROP TABLE sourcing_progress")
+    conn.execute("ALTER TABLE sourcing_progress_new RENAME TO sourcing_progress")
+    seed_starting_icps(conn)
+    conn.execute("UPDATE schema_version SET version = 2")
+
+
+def seed_starting_icps(conn: Connection) -> None:
+    """The ICPs a database starts with, plus an inactive one for any ICP name already in use.
+
+    Only adds what's missing, so it never overwrites an ICP someone edited.
+    """
+    for icp in (*seed_icps.LEGACY_SEGMENTS, *seed_icps.PILOT_ICPS):
+        if insert_icp(conn, icp):
+            for source, settings in icp["sources"].items():
+                save_icp_source(conn, icp["key"], source, settings)
+    used = conn.execute(
+        "SELECT DISTINCT icp FROM companies UNION SELECT DISTINCT icp FROM batches"
+    ).fetchall()
+    for row in used:
+        if row["icp"] and get_icp(conn, str(row["icp"])) is None:
+            insert_icp(
+                conn,
+                {
+                    "key": str(row["icp"]),
+                    "name": str(row["icp"]),
+                    "description": "Added when ICPs replaced segments; edit it on the ICPs page.",
+                    "active": False,
+                },
+            )
 
 
 def _read_schema_version(conn: Connection) -> int:
@@ -419,7 +523,7 @@ def insert_company(conn: Connection, company: dict[str, Any]) -> bool:
 
 
 def list_companies(
-    conn: Connection, segment: str | None = None, search: str | None = None
+    conn: Connection, icp: str | None = None, search: str | None = None
 ) -> list[RowMapping]:
     """Saved companies, oldest first, leaving out any domain on the do-not-contact list.
 
@@ -427,35 +531,141 @@ def list_companies(
     """
     sql = "SELECT * FROM companies WHERE domain NOT IN (SELECT value FROM suppression)"
     params: dict[str, Any] = {}
-    if segment:
-        sql += " AND segment = :segment"
-        params["segment"] = segment
+    if icp:
+        sql += " AND icp = :icp"
+        params["icp"] = icp
     if search and search.strip():
         sql += " AND (LOWER(name) LIKE :search OR LOWER(domain) LIKE :search)"
         params["search"] = f"%{search.strip().lower()}%"
     return conn.execute(sql + " ORDER BY id", params).fetchall()
 
 
-def raw_records(conn: Connection, segment: str | None = None) -> list[str]:
+def raw_records(conn: Connection, icp: str | None = None) -> list[str]:
     """The provider's original JSON for each saved company."""
     sql = "SELECT raw FROM companies WHERE raw IS NOT NULL"
     params: dict[str, Any] = {}
-    if segment:
-        sql += " AND segment = :segment"
-        params["segment"] = segment
+    if icp:
+        sql += " AND icp = :icp"
+        params["icp"] = icp
     return [str(row["raw"]) for row in conn.execute(sql + " ORDER BY id", params).fetchall()]
 
 
 def count_companies(conn: Connection) -> dict[str, int]:
-    """Number of saved companies per segment."""
-    rows = conn.execute("SELECT segment, COUNT(*) AS n FROM companies GROUP BY segment").fetchall()
-    return {str(row["segment"]): int(row["n"]) for row in rows}
+    """Number of saved companies per ICP."""
+    rows = conn.execute("SELECT icp, COUNT(*) AS n FROM companies GROUP BY icp").fetchall()
+    return {str(row["icp"]): int(row["n"]) for row in rows}
 
 
 def count_companies_by_status(conn: Connection) -> dict[str, int]:
     """Number of saved companies per status (new, exported, enriched, no_contact)."""
     rows = conn.execute("SELECT status, COUNT(*) AS n FROM companies GROUP BY status").fetchall()
     return {str(row["status"]): int(row["n"]) for row in rows}
+
+
+# --- ICPs ---------------------------------------------------------------------------------------
+
+ICP_COLUMNS = (
+    "key",
+    "name",
+    "description",
+    "offer",
+    "country",
+    "active",
+    "person_titles",
+    "person_locations",
+    "exclude_notes",
+    "target_leads",
+)
+_ICP_LISTS = ("person_titles", "person_locations")
+_ICP_DEFAULTS: dict[str, Any] = {
+    "description": "",
+    "offer": "",
+    "country": "",
+    "active": True,
+    "person_titles": [],
+    "person_locations": [],
+    "exclude_notes": "",
+    "target_leads": 0,
+}
+
+
+def _icp_params(icp: dict[str, Any]) -> dict[str, Any]:
+    params = {column: icp.get(column, _ICP_DEFAULTS.get(column)) for column in ICP_COLUMNS}
+    for column in _ICP_LISTS:
+        params[column] = json.dumps(list(params[column] or []), ensure_ascii=False)
+    params["active"] = 1 if params["active"] else 0
+    return params
+
+
+def _icp_out(row: RowMapping) -> dict[str, Any]:
+    out = dict(row)
+    for column in _ICP_LISTS:
+        out[column] = json.loads(out[column] or "[]")
+    out["active"] = bool(out["active"])
+    return out
+
+
+def list_icps(conn: Connection) -> list[dict[str, Any]]:
+    """Every ICP, active ones first, as plain dicts with lists."""
+    rows = conn.execute("SELECT * FROM icps ORDER BY active DESC, key").fetchall()
+    return [_icp_out(row) for row in rows]
+
+
+def get_icp(conn: Connection, key: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM icps WHERE key = :key", {"key": key}).fetchone()
+    return _icp_out(row) if row else None
+
+
+def insert_icp(conn: Connection, icp: dict[str, Any]) -> bool:
+    """Add an ICP. Returns False if that key is taken."""
+    params = _icp_params(icp)
+    params["created_at"] = params["updated_at"] = now_utc()
+    columns = (*ICP_COLUMNS, "created_at", "updated_at")
+    result = conn.execute(
+        f"INSERT INTO icps ({', '.join(columns)}) "
+        f"VALUES ({', '.join(':' + c for c in columns)}) ON CONFLICT (key) DO NOTHING",
+        params,
+    )
+    return result.rowcount == 1
+
+
+def update_icp(conn: Connection, key: str, icp: dict[str, Any]) -> bool:
+    """Change an ICP (not its key). Returns False if there's no such ICP."""
+    params = _icp_params({**icp, "key": key})
+    params["updated_at"] = now_utc()
+    sets = ", ".join(f"{c} = :{c}" for c in (*ICP_COLUMNS[1:], "updated_at"))
+    return conn.execute(f"UPDATE icps SET {sets} WHERE key = :key", params).rowcount == 1
+
+
+def list_icp_sources(conn: Connection, icp: str | None = None) -> dict[str, dict[str, Any]]:
+    """{icp: {source: settings}} for one ICP or all of them."""
+    sql = "SELECT icp, source, settings FROM icp_sources"
+    params: dict[str, Any] = {}
+    if icp:
+        sql += " WHERE icp = :icp"
+        params["icp"] = icp
+    out: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(sql, params).fetchall():
+        out.setdefault(str(row["icp"]), {})[str(row["source"])] = json.loads(row["settings"])
+    return out
+
+
+def save_icp_source(conn: Connection, icp: str, source: str, settings: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        INSERT INTO icp_sources (icp, source, settings) VALUES (:icp, :source, :settings)
+        ON CONFLICT (icp, source) DO UPDATE SET settings = excluded.settings
+        """,
+        {"icp": icp, "source": source, "settings": json.dumps(settings, ensure_ascii=False)},
+    )
+
+
+def delete_icp_source(conn: Connection, icp: str, source: str) -> None:
+    """Forget one source's settings for an ICP (the person cleared them). The ICP stays."""
+    conn.execute(
+        "DELETE FROM icp_sources WHERE icp = :icp AND source = :source",
+        {"icp": icp, "source": source},
+    )
 
 
 # --- suppression --------------------------------------------------------------------------------
@@ -494,15 +704,17 @@ def count_suppression(conn: Connection) -> int:
 # --- sourcing progress --------------------------------------------------------------------------
 
 
-def get_progress(conn: Connection, segment: str) -> RowMapping | None:
+def get_progress(conn: Connection, icp: str, source: str) -> RowMapping | None:
     return conn.execute(
-        "SELECT * FROM sourcing_progress WHERE segment = :segment", {"segment": segment}
+        "SELECT * FROM sourcing_progress WHERE icp = :icp AND source = :source",
+        {"icp": icp, "source": source},
     ).fetchone()
 
 
 def save_progress(
     conn: Connection,
-    segment: str,
+    icp: str,
+    source: str,
     filters_hash: str,
     next_page: int,
     total_entries: int | None,
@@ -511,9 +723,9 @@ def save_progress(
     conn.execute(
         """
         INSERT INTO sourcing_progress
-            (segment, filters_hash, next_page, total_entries, exhausted, updated_at)
-        VALUES (:segment, :filters_hash, :next_page, :total_entries, :exhausted, :updated_at)
-        ON CONFLICT (segment) DO UPDATE SET
+            (icp, source, filters_hash, next_page, total_entries, exhausted, updated_at)
+        VALUES (:icp, :source, :filters_hash, :next_page, :total_entries, :exhausted, :updated_at)
+        ON CONFLICT (icp, source) DO UPDATE SET
             filters_hash = excluded.filters_hash,
             next_page = excluded.next_page,
             total_entries = excluded.total_entries,
@@ -521,7 +733,8 @@ def save_progress(
             updated_at = excluded.updated_at
         """,
         {
-            "segment": segment,
+            "icp": icp,
+            "source": source,
             "filters_hash": filters_hash,
             "next_page": next_page,
             "total_entries": total_entries,
@@ -534,29 +747,38 @@ def save_progress(
 # --- Clay batches -------------------------------------------------------------------------------
 
 
-def _waiting_for_clay_sql(segment: str | None) -> tuple[str, dict[str, Any]]:
+def _waiting_for_clay_sql(icp: str | None) -> tuple[str, dict[str, Any]]:
     where = "status = 'new' AND domain NOT IN (SELECT value FROM suppression)"
     params: dict[str, Any] = {}
-    if segment:
-        where += " AND segment = :segment"
-        params["segment"] = segment
+    if icp:
+        where += " AND icp = :icp"
+        params["icp"] = icp
     return where, params
 
 
-def count_waiting_for_clay(conn: Connection, segment: str | None = None) -> int:
-    where, params = _waiting_for_clay_sql(segment)
+def count_waiting_for_clay(conn: Connection, icp: str | None = None) -> int:
+    where, params = _waiting_for_clay_sql(icp)
     row = conn.execute(f"SELECT COUNT(*) AS n FROM companies WHERE {where}", params).fetchone()
     return int(row["n"]) if row else 0
 
 
-def create_batch(conn: Connection, file: str, rows: int, segment: str | None) -> int:
+def waiting_for_clay_by_icp(conn: Connection) -> dict[str, int]:
+    """Companies waiting for Clay, per ICP, in one query."""
+    where, params = _waiting_for_clay_sql(None)
+    rows = conn.execute(
+        f"SELECT icp, COUNT(*) AS n FROM companies WHERE {where} GROUP BY icp", params
+    ).fetchall()
+    return {str(row["icp"]): int(row["n"]) for row in rows}
+
+
+def create_batch(conn: Connection, file: str, rows: int, icp: str | None) -> int:
     row = conn.execute(
         """
-        INSERT INTO batches (file, rows, segment, exported_at)
-        VALUES (:file, :rows, :segment, :exported_at)
+        INSERT INTO batches (file, rows, icp, exported_at)
+        VALUES (:file, :rows, :icp, :exported_at)
         RETURNING id
         """,
-        {"file": file, "rows": rows, "segment": segment, "exported_at": now_utc()},
+        {"file": file, "rows": rows, "icp": icp, "exported_at": now_utc()},
     ).fetchone()
     assert row is not None
     return int(row["id"])
@@ -574,14 +796,14 @@ def delete_batch(conn: Connection, batch_id: int) -> None:
 
 
 def claim_companies_for_clay(
-    conn: Connection, segment: str | None, limit: int, batch_id: int
+    conn: Connection, icp: str | None, limit: int, batch_id: int
 ) -> list[RowMapping]:
     """Claim up to `limit` waiting companies in one UPDATE ... RETURNING.
 
     Two concurrent exports never take the same company: each row can only move
     from status 'new' to 'exported' once.
     """
-    where, params = _waiting_for_clay_sql(segment)
+    where, params = _waiting_for_clay_sql(icp)
     return conn.execute(
         f"""
         UPDATE companies
@@ -623,7 +845,7 @@ def list_batches(conn: Connection) -> list[RowMapping]:
     """Every batch with what came back: people, emails, and each state."""
     return conn.execute(
         """
-        SELECT b.id, b.segment, b.rows, b.exported_at, b.imported_at, b.clay_account,
+        SELECT b.id, b.icp, b.rows, b.exported_at, b.imported_at, b.clay_account,
                b.clay_credits, b.file,
                COUNT(l.id) AS people,
                COUNT(l.email) AS emails,
@@ -632,7 +854,7 @@ def list_batches(conn: Connection) -> list[RowMapping]:
                COUNT(*) FILTER (WHERE l.state = 'hold') AS hold,
                COUNT(*) FILTER (WHERE l.state = 'dropped') AS dropped
         FROM batches b LEFT JOIN leads l ON l.batch_id = b.id
-        GROUP BY b.id, b.segment, b.rows, b.exported_at, b.imported_at, b.clay_account,
+        GROUP BY b.id, b.icp, b.rows, b.exported_at, b.imported_at, b.clay_account,
                  b.clay_credits, b.file
         ORDER BY b.id DESC
         """
@@ -686,7 +908,7 @@ def list_leads(conn: Connection, state: str | None = None) -> list[RowMapping]:
     """People found by Clay, with their company, newest first."""
     sql = """
         SELECT l.email, l.first_name, l.last_name, l.title, co.domain AS company_domain,
-               co.name AS company_name, co.segment, l.state, l.state_reason, l.clay_status,
+               co.name AS company_name, co.icp, l.state, l.state_reason, l.clay_status,
                l.linkedin_url, l.batch_id, l.created_at
         FROM leads l JOIN companies co ON co.id = l.company_id
     """

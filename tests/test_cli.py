@@ -72,22 +72,41 @@ def test_source_dry_run_uses_no_network(
 ) -> None:
     monkeypatch.setattr(cli, "new_client", no_network_client)
     monkeypatch.setenv("APOLLO_API_KEY", "key")
-    assert call(project, "source", "ai_accounting", "--pages", "2") == 0
+    assert call(project, "source", "bpa_us_recruit", "--pages", "2") == 0
     assert "DRY RUN" in capsys.readouterr().out
 
 
-def test_source_unknown_segment(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_source_unknown_icp(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert call(project, "source", "nope") == 2
-    assert "ai_accounting" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no ICP called 'nope'" in err and "bpa_us_recruit" in err
+
+
+@pytest.mark.parametrize(
+    ("icp", "message"),
+    [("ai_accounting", "inactive"), ("dev_us_signal", "job-post signal")],
+)
+def test_source_refuses_icps_that_cant_run(
+    project: Path, capsys: pytest.CaptureFixture[str], icp: str, message: str
+) -> None:
+    assert call(project, "source", icp) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_icps_lists_them(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert call(project, "icps") == 0
+    out = capsys.readouterr().out
+    assert "dev_us_signal  (active; apollo)" in out
+    assert "ai_accounting  (inactive; apollo)" in out
 
 
 def test_source_live_needs_a_key(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert call(project, "source", "ai_accounting", "--live") == 2
+    assert call(project, "source", "bpa_us_recruit", "--live") == 2
     assert "APOLLO_API_KEY" in capsys.readouterr().err
 
 
 def test_source_rejects_silly_page_counts(project: Path) -> None:
-    assert call(project, "source", "ai_accounting", "--pages", "0") == 2
+    assert call(project, "source", "bpa_us_recruit", "--pages", "0") == 2
 
 
 def test_source_live_then_export(
@@ -96,7 +115,7 @@ def test_source_live_then_export(
     fake = FakeApollo((200, page([org(1), org(2), org(3, "", website_url=None)])))
     monkeypatch.setattr(cli, "new_client", fake.client)
     monkeypatch.setenv("APOLLO_API_KEY", "key")
-    assert call(project, "source", "ai_accounting", "--live") == 0
+    assert call(project, "source", "bpa_us_recruit", "--live") == 0
     out = capsys.readouterr().out
     assert "saved (new)          2" in out
     assert "(1 of 10 used this month)" in out
@@ -108,7 +127,7 @@ def test_source_live_then_export(
     with target.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert [row["domain"] for row in rows] == ["company1.com"]
-    assert rows[0]["segment"] == "ai_accounting"
+    assert rows[0]["icp"] == "bpa_us_recruit"
 
 
 def test_source_live_reports_errors(
@@ -117,7 +136,7 @@ def test_source_live_reports_errors(
     fake = FakeApollo((403, {"error": "not on your plan"}))
     monkeypatch.setattr(cli, "new_client", fake.client)
     monkeypatch.setenv("APOLLO_API_KEY", "key")
-    assert call(project, "source", "ai_accounting", "--live") == 1
+    assert call(project, "source", "bpa_us_recruit", "--live") == 1
     assert "refused Organization Search" in capsys.readouterr().out
 
 
@@ -146,7 +165,7 @@ def test_fields_lists_names_never_values(
     records = [org(1, phone="555-0100-unique"), org(2, phone=None)]
     monkeypatch.setattr(cli, "new_client", FakeApollo((200, page(records))).client)
     monkeypatch.setenv("APOLLO_API_KEY", "key")
-    call(project, "source", "ai_accounting", "--live")
+    call(project, "source", "bpa_us_recruit", "--live")
     capsys.readouterr()
 
     assert call(project, "fields") == 0
@@ -163,7 +182,7 @@ def fill(
     """Save company1.com to company3.com through a fake Apollo."""
     monkeypatch.setattr(cli, "new_client", FakeApollo((200, page([org(1), org(2), org(3)]))).client)
     monkeypatch.setenv("APOLLO_API_KEY", "key")
-    call(project, "source", "ai_accounting", "--live")
+    call(project, "source", "bpa_us_recruit", "--live")
     capsys.readouterr()
 
 
@@ -171,7 +190,7 @@ def test_clay_round_trip(
     project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fill(project, monkeypatch, capsys)
-    assert call(project, "clay", "export", "--rows", "2") == 0
+    assert call(project, "clay", "export", "bpa_us_recruit", "--rows", "2") == 0
     out = capsys.readouterr().out
     assert "wrote 2 companies to data/clay/batch_" in out and "(batch 1)" in out
 
@@ -213,8 +232,9 @@ def test_clay_import_explains_missing_columns(
 def test_clay_export_with_nothing_waiting(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert call(project, "clay", "export") == 0
-    assert "Nothing waiting for Clay" in capsys.readouterr().out
+    assert call(project, "clay", "export", "bpa_us_recruit") == 0
+    assert "Nothing from bpa_us_recruit is waiting for Clay" in capsys.readouterr().out
+    assert call(project, "clay", "export", "nope") == 2
 
 
 def test_backup(project: Path, capsys: pytest.CaptureFixture[str]) -> None:

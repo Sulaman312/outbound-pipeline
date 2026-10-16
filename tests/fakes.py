@@ -1,4 +1,4 @@
-"""Fake Apollo responses and a fake transport for tests. Nothing here uses the network."""
+"""Fake Apollo responses, a fake transport, and test ICPs. Nothing here uses the network."""
 
 from __future__ import annotations
 
@@ -72,3 +72,23 @@ def no_network_client() -> httpx.Client:
         raise AssertionError(f"network used in a test that must not: {request.url}")
 
     return httpx.Client(transport=httpx.MockTransport(refuse))
+
+
+def icp_data(key: str = "test_accounting", **fields: Any) -> dict[str, Any]:
+    """An active ICP with Apollo settings, as the ICPs page would send it."""
+    data: dict[str, Any] = {
+        "key": key,
+        "name": "US accounting firms",
+        "offer": "AI automation",
+        "country": "US",
+        "person_titles": ["Owner"],
+        "sources": {
+            "apollo": {
+                "hq_locations": ["United States"],
+                "employee_ranges": ["1,20"],
+                "keywords": ["accounting", "bookkeeping"],
+            }
+        },
+    }
+    data.update(fields)
+    return data
