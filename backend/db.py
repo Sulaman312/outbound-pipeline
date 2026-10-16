@@ -189,12 +189,17 @@ class Result:
 
 
 class Connection:
-    """SQLAlchemy connection with sqlite3-style `with conn:` transactions."""
+    """SQLAlchemy connection with sqlite3-style `with conn:` transactions.
+
+    Statements run inside a transaction that SQLAlchemy starts on its own. The outermost
+    `with conn:` block commits it on success and rolls it back on an error. A block inside
+    another block doesn't commit early: the outer one decides.
+    """
 
     def __init__(self, sa_conn: SaConnection, url: str) -> None:
         self._conn = sa_conn
         self.url = url
-        self._trans: Any = None
+        self._depth = 0
 
     @property
     def dialect(self) -> str:
@@ -208,20 +213,17 @@ class Connection:
             self._conn.execute(text(sql), params_list)
 
     def __enter__(self) -> Connection:
-        if self._conn.in_transaction():
-            self._trans = self._conn.begin_nested()
-        else:
-            self._trans = self._conn.begin()
+        self._depth += 1
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
-        if self._trans is None:
+        self._depth -= 1
+        if self._depth:
             return
         if exc_type is None:
-            self._trans.commit()
+            self._conn.commit()
         else:
-            self._trans.rollback()
-        self._trans = None
+            self._conn.rollback()
 
     def close(self) -> None:
         self._conn.close()
@@ -269,7 +271,7 @@ def connect(root: Path, *, url: str | None = None) -> Connection:
     if resolved.startswith("sqlite:///"):
         Path(resolved.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     if resolved not in _engines:
-        _engines[resolved] = create_engine(resolved, isolation_level="AUTOCOMMIT")
+        _engines[resolved] = create_engine(resolved)
     sa_conn = _engines[resolved].connect()
     conn = Connection(sa_conn, resolved)
     with conn:
@@ -289,8 +291,8 @@ def init_schema(conn: Connection) -> None:
             conn.execute(statement)
         conn.execute("INSERT INTO schema_version (version) VALUES (:version)", {"version": 1})
         version = 1
-        if conn.dialect == "postgresql":
-            _enable_rls(conn)
+    if conn.dialect == "postgresql":
+        _enable_rls(conn)
     # Future versions: run migrations here, then UPDATE schema_version.
 
 
@@ -317,11 +319,17 @@ def _table_exists(conn: Connection, name: str) -> bool:
 
 
 def _enable_rls(conn: Connection) -> None:
-    """Block Supabase's public API key; we connect as the owner so we still see rows."""
-    for table in TABLES:
-        if table == "schema_version":
-            continue
-        conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+    """Block Supabase's public API key on every table; we connect as the owner so we still see rows.
+
+    Checks first, so a normal connect costs one query and only fixes tables that need it.
+    """
+    rows = conn.execute(
+        "SELECT relname FROM pg_class "
+        "WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND NOT relrowsecurity"
+    ).fetchall()
+    for name in (str(row["relname"]) for row in rows):
+        if name in TABLES:
+            conn.execute(f"ALTER TABLE {name} ENABLE ROW LEVEL SECURITY")
 
 
 def now_utc() -> str:
@@ -557,21 +565,16 @@ def claim_companies_for_clay(
     Two concurrent exports never take the same company: each row can only move
     from status 'new' to 'exported' once.
     """
+    where, params = _waiting_for_clay_sql(segment)
     return conn.execute(
-        """
+        f"""
         UPDATE companies
         SET status = 'exported', batch_id = :batch_id
-        WHERE id IN (
-            SELECT id FROM companies
-            WHERE status = 'new'
-              AND domain NOT IN (SELECT value FROM suppression)
-              AND (:segment IS NULL OR segment = :segment)
-            ORDER BY id
-            LIMIT :limit
-        )
+        WHERE id IN (SELECT id FROM companies WHERE {where} ORDER BY id LIMIT :limit)
+          AND status = 'new'
         RETURNING *
         """,
-        {"batch_id": batch_id, "segment": segment, "limit": limit},
+        {**params, "batch_id": batch_id, "limit": limit},
     ).fetchall()
 
 

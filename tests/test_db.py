@@ -44,7 +44,31 @@ def test_connect_creates_file_and_tables(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_newer_database_is_refused(conn: db.Connection) -> None:
+def test_failed_block_rolls_back(conn: db.Connection) -> None:
+    with pytest.raises(RuntimeError), conn:
+        db.add_suppression(conn, "acme.com", "domain", "test")
+        raise RuntimeError("boom")
+    assert not db.is_suppressed(conn, "acme.com")
+
+
+def test_inner_block_waits_for_the_outer_one(conn: db.Connection) -> None:
+    with pytest.raises(RuntimeError), conn:
+        with conn:
+            db.add_suppression(conn, "acme.com", "domain", "test")
+        raise RuntimeError("the outer block fails after the inner one finished")
+    assert not db.is_suppressed(conn, "acme.com")
+
+
+def test_read_before_block_does_not_break_it(conn: db.Connection) -> None:
+    db.is_suppressed(conn, "acme.com")  # a read outside any block, like source.start_point
+    with conn:
+        db.add_suppression(conn, "acme.com", "domain", "test")
+    assert db.is_suppressed(conn, "acme.com")
+
+
+def test_newer_database_is_refused(tmp_path: Path) -> None:
+    # Its own SQLite file, so a shared Postgres test database is never left at a future version.
+    conn = db.connect(tmp_path, url=f"sqlite:///{(tmp_path / 'newer.db').as_posix()}")
     with conn:
         conn.execute("DELETE FROM schema_version")
         conn.execute(
@@ -54,6 +78,7 @@ def test_newer_database_is_refused(conn: db.Connection) -> None:
     with pytest.raises(RuntimeError, match="newer|Update the code"):
         with conn:
             db.init_schema(conn)
+    conn.close()
 
 
 def test_duplicate_domain_or_provider_id_is_skipped(conn: db.Connection) -> None:

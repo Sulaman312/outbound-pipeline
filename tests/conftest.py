@@ -63,22 +63,17 @@ def wipe_shared_postgres() -> None:
     if not url:
         yield
         return
-    root = Path.cwd()
-    conn = db.connect(root)
-    try:
-        with conn:
-            for table in _WIPE_ORDER:
-                if db._table_exists(conn, table):
-                    conn.execute(f"DELETE FROM {table}")
-    finally:
-        conn.close()
+    _wipe(url)
     yield
-    conn = db.connect(root)
+    _wipe(url)  # the URL captured above: a test may have unset DATABASE_URL by now
+
+
+def _wipe(url: str) -> None:
+    """Empty every table and restart the id counters, so each test sees batch 1, company 1."""
+    conn = db.connect(Path.cwd(), url=url)
     try:
         with conn:
-            for table in _WIPE_ORDER:
-                if db._table_exists(conn, table):
-                    conn.execute(f"DELETE FROM {table}")
+            conn.execute(f"TRUNCATE {', '.join(_WIPE_ORDER)} RESTART IDENTITY CASCADE")
     finally:
         conn.close()
 
