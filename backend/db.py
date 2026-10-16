@@ -169,14 +169,6 @@ LEAD_COLUMNS = (
     "raw",
 )
 
-# Old Clay decision names -> lead states (for the copy script and docs).
-DECISION_TO_STATE: dict[str, str] = {
-    "ready": "verified",
-    "maybe": "needs_check",
-    "hold": "hold",
-    "drop": "dropped",
-}
-
 
 class Result:
     """Thin wrapper so callers can use fetchone/fetchall/rowcount like sqlite3."""
@@ -215,10 +207,6 @@ class Connection:
 
     def execute(self, sql: str, params: dict[str, Any] | None = None) -> Result:
         return Result(self._conn.execute(text(sql), params or {}))
-
-    def executemany(self, sql: str, params_list: list[dict[str, Any]]) -> None:
-        if params_list:
-            self._conn.execute(text(sql), params_list)
 
     def __enter__(self) -> Connection:
         self._depth += 1
@@ -496,17 +484,6 @@ def usage_this_month(conn: Connection, provider: str, unit: str) -> int:
     return int(row["amount"]) if row else 0
 
 
-def add_usage(conn: Connection, provider: str, unit: str, amount: int) -> None:
-    conn.execute(
-        """
-        INSERT INTO usage (provider, unit, month, amount)
-        VALUES (:provider, :unit, :month, :amount)
-        ON CONFLICT (provider, unit, month) DO UPDATE SET amount = usage.amount + excluded.amount
-        """,
-        {"provider": provider, "unit": unit, "month": current_month(), "amount": amount},
-    )
-
-
 def reserve_usage(conn: Connection, provider: str, unit: str, amount: int, cap: int) -> bool:
     """Reserve `amount` under the monthly cap in one statement. False if it would go over.
 
@@ -582,16 +559,6 @@ def list_companies(
         sql += " AND (LOWER(name) LIKE :search OR LOWER(domain) LIKE :search)"
         params["search"] = f"%{search.strip().lower()}%"
     return conn.execute(sql + " ORDER BY id", params).fetchall()
-
-
-def raw_records(conn: Connection, icp: str | None = None) -> list[str]:
-    """The provider's original JSON for each saved company."""
-    sql = "SELECT raw FROM companies WHERE raw IS NOT NULL"
-    params: dict[str, Any] = {}
-    if icp:
-        sql += " AND icp = :icp"
-        params["icp"] = icp
-    return [str(row["raw"]) for row in conn.execute(sql + " ORDER BY id", params).fetchall()]
 
 
 def count_companies(conn: Connection) -> dict[str, int]:

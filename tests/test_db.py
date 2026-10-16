@@ -98,8 +98,8 @@ def test_missing_required_field_still_raises(conn: db.Connection) -> None:
 def test_usage_adds_up(conn: db.Connection) -> None:
     assert db.usage_this_month(conn, "apollo", "credits") == 0
     with conn:
-        db.add_usage(conn, "apollo", "credits", 1)
-        db.add_usage(conn, "apollo", "credits", 2)
+        db.reserve_usage(conn, "apollo", "credits", 1, 100)
+        db.reserve_usage(conn, "apollo", "credits", 2, 100)
     assert db.usage_this_month(conn, "apollo", "credits") == 3
 
 

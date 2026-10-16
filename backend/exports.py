@@ -1,4 +1,4 @@
-"""Write saved companies or leads to a CSV file you can open in Excel or Google Sheets.
+"""Saved companies or leads as CSV for the app's Download CSV buttons (opens in Excel or Sheets).
 
 This only reads. It doesn't change any status, and it leaves out do-not-contact companies.
 """
@@ -8,7 +8,6 @@ from __future__ import annotations
 import csv
 import io
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from backend import db
@@ -44,9 +43,10 @@ LEAD_COLUMNS = (
 )
 
 
-def default_path(root: Path, kind: str = "companies") -> Path:
+def filename(kind: str) -> str:
+    """The name a downloaded CSV gets, like companies_20261016-120000.csv."""
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return root / "data" / "exports" / f"{kind}_{stamp}.csv"
+    return f"{kind}_{stamp}.csv"
 
 
 def _plain(row: Any, columns: tuple[str, ...]) -> dict[str, object]:
@@ -76,23 +76,3 @@ def csv_text(rows: list[dict[str, object]], columns: tuple[str, ...] = COLUMNS) 
 def excel_bytes(text: str) -> bytes:
     """CSV text as bytes Excel on Windows opens with accented names intact (UTF-8 with BOM)."""
     return text.encode("utf-8-sig")
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # utf-8-sig so Excel on Windows shows accented names correctly
-    path.write_text(text, encoding="utf-8-sig", newline="")
-
-
-def export_companies(conn: Connection, path: Path, icp: str | None = None) -> int:
-    """Write the companies CSV and return how many it holds."""
-    rows = company_rows(conn, icp)
-    _write(path, csv_text(rows))
-    return len(rows)
-
-
-def export_leads(conn: Connection, path: Path, state: str | None = None) -> int:
-    """Write the leads CSV and return how many it holds."""
-    rows = lead_rows(conn, state)
-    _write(path, csv_text(rows, LEAD_COLUMNS))
-    return len(rows)

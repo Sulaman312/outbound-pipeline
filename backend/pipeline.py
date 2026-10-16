@@ -100,11 +100,3 @@ STAGES: tuple[Stage, ...] = (
         ("finished", "dropped"),
     ),
 )
-
-# Clay email-check result -> lead state (also applied during Clay import).
-CLAY_STATE_MAP: dict[str, str] = {
-    "ready": "verified",
-    "maybe": "needs_check",
-    "hold": "hold",
-    "drop": "dropped",
-}

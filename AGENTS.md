@@ -10,9 +10,10 @@ automation, and outsourced front-end developers. Owner: Wania.
 Read before doing anything:
 
 - `docs/research.md`: facts about each tool, with sources.
-- `docs/plan.md`: the design, the build order, and the decisions table.
-- `docs/guide.md`: one section per module (What it does / In the UI / In the code / How to run /
-  Cost / Common problems). Every module ships with its `docs/guide.md` section.
+- `docs/plan.md`: the stage list, what's built, the build order ahead, and the decisions table.
+- `docs/guide.md`: the manual, one section per app page (What it does / In the app / In the
+  code / Cost / Common problems).
+- `README.md`: what this is, one-time setup, how to start the app.
 
 ## How work is done
 
@@ -21,8 +22,9 @@ Read before doing anything:
 - If something needs a choice the plan doesn't make, stop and ask. Don't pick.
 - Everything goes straight to `main`. No branches or pull requests (Wania's choice).
 - Before pushing, run `ruff format . && ruff check . && pytest`. All three must pass.
-- Keep `README.md` (how to run it) and `docs/plan.md` (what's built) in step with the code.
 - Every module ships with its `docs/guide.md` section.
+- Docs: each module updates only its own `docs/guide.md` section and its status in
+  `docs/plan.md`. `README.md` changes only when setup changes. No new doc files.
 
 ## Decisions
 
@@ -48,7 +50,7 @@ Read before doing anything:
 
 ```
 backend/
-  cli.py                 commands only, no logic
+  cli.py                 serve, check, backup (everything else is in the app); no logic
   app.py                 FastAPI app: /api routes + serves ui/dist (127.0.0.1 only)
   api/                   routes by resource (overview, icps, source, companies, clay, leads,
                          suppression) + deps.py; routes call stage functions, no logic
@@ -62,12 +64,10 @@ backend/
   pipeline.py            STAGES + LEAD_STATES
   suppression.py         do-not-contact
   exports.py             CSV exports
-  fields.py              Apollo field names/counts
   integrations/apollo.py, integrations/google_places.py
   stages/source.py       company sourcing per ICP and source (Apollo, Google Maps)
   stages/enrich.py       Clay CSV out and in
   stages/verify.py       lead-state rules from Clay's result
-scripts/copy_sqlite_to_db.py
 config/settings.yaml     caps
 ui/                      React + Vite, plain CSS
   src/api.js             every fetch to the backend

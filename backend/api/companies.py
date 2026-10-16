@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response
@@ -37,7 +36,7 @@ def download_companies(
 ) -> Response:
     icp_or_400(conn, icp)
     text = exports.csv_text(exports.company_rows(conn, icp, search, source))
-    return csv_response(text, exports.default_path(Path("."), "companies").name)
+    return csv_response(text, exports.filename("companies"))
 
 
 def csv_response(text: str, filename: str) -> Response:

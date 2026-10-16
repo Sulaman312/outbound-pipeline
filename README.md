@@ -1,48 +1,24 @@
 # outbound-pipeline
 
-Cold email pipeline for Arsuno. It targets US companies with 1–20 employees, with two offers: AI
-automation, and outsourced front-end developers.
+Cold email pipeline for Arsuno: US companies with 1–20 employees, two offers (AI automation, and
+outsourced front-end developers). A web app on your own computer, sharing one Supabase database
+between Wania's and Ayesha's laptops:
 
-**What works today: finding companies, then finding the person and email through Clay.**
-- You describe who to target as **ICPs** on the app's ICPs page (shared by both laptops).
-- For each ICP, it finds companies on Apollo, Google Maps, or both. Google Maps searches each
-  phrase in each city, skips closed places, places without a website, and likely chains.
-- It saves the usable ones and skips no-website, do-not-contact, and duplicates.
-- It remembers where it stopped, and never goes over the monthly credit cap.
-- It writes an ICP's next companies to a file for Clay, with that ICP's people to look for
-  (two laptops never claim the same company).
-- It reads Clay's results back, and sorts every person into a lead state:
-  - **verified**: Clay says valid;
-  - **needs_check**: catch-all or unknown, re-checked with Instantly next;
-  - **hold**: info@-style addresses;
-  - **dropped**: no email, invalid, or do-not-contact.
-- You can export companies or people to a CSV for Excel or Google Sheets.
-- The database is Supabase Postgres (shared); tests and a no-`DATABASE_URL` laptop use SQLite.
-- All of it works from a **web app on your own computer** (`outbound serve`), or from commands.
+1. **ICPs**: describe who to target.
+2. **Find companies** on Apollo, Google Maps, or both.
+3. **Enrich with Clay**: a file goes to Clay, Clay's people and emails come back as leads.
+4. Verify, send and track come next.
 
-Next: the Clay round trip per ICP (M2), then Instantly verification and campaigns. See
-[docs/plan.md](docs/plan.md).
-
-- [docs/clay-table.md](docs/clay-table.md) — what to click in Clay for each batch
-- [docs/guide.md](docs/guide.md) — one section per module
-- [docs/research.md](docs/research.md) — tools, costs, rules
-- [docs/plan.md](docs/plan.md) — design, build order, decisions
-
----
+How each page works: [docs/guide.md](docs/guide.md). What's built and what's next:
+[docs/plan.md](docs/plan.md). Facts about each tool: [docs/research.md](docs/research.md).
 
 ## One-time setup (Windows)
 
-1. **Python 3.11 or newer** (check with `py --version`) and **Node.js LTS** from
-   https://nodejs.org (check with `node --version`). Node is only needed to build the app's
-   screens.
-2. **Get the code:**
+1. Install **Python 3.11+** (`py --version`) and **Node.js LTS** from https://nodejs.org
+   (`node --version`).
+2. Get the code and install it, in the project folder:
    ```powershell
-   cd outbound-pipeline
-   git checkout main
    git pull
-   ```
-3. **Install it:**
-   ```powershell
    py -m venv .venv
    .venv\Scripts\pip install -e .
    cd ui
@@ -50,41 +26,26 @@ Next: the Clay round trip per ICP (M2), then Instantly verification and campaign
    npm run build
    cd ..
    ```
-   Run the `pip install` line again after a `git pull` that changes `pyproject.toml`, and the
-   three `npm`/`cd` lines again after one that changes `ui/`.
-4. **Create a Supabase project** (free tier is fine to start). In Project Settings → Database,
-   copy the **Session pooler** connection string (port **5432**). It should look like
-   `postgresql://postgres.[ref]:[password]@aws-0-....pooler.supabase.com:5432/postgres`.
-5. **Make a `.env`** next to `README.md` (never commit it):
+   Run `pip install -e .` again after a pull that changes `pyproject.toml`, and the `npm` lines
+   again after one that changes `ui/`.
+3. **Supabase:** in the Supabase project, Project Settings → Database, copy the **Session pooler**
+   connection string (port 5432).
+4. **Make a `.env`** next to this file (never commit it):
    ```
    DATABASE_URL=postgresql://postgres.[ref]:[YOUR-PASSWORD]@aws-0-....pooler.supabase.com:5432/postgres?sslmode=require
-   APOLLO_API_KEY=your-key-here
-   GOOGLE_PLACES_API_KEY=your-google-key-here
+   APOLLO_API_KEY=...
+   GOOGLE_PLACES_API_KEY=...
    ```
-   The code rewrites this to the psycopg driver automatically. Leave `DATABASE_URL` empty to use
-   a local SQLite file at `data/outbound.db` instead.
-
-   **The Google key** (for Google Maps): in the Google Cloud Console, pick the project, turn on
-   **billing** (needed even for the free 1,000 requests a month), enable **Places API (New)**,
-   then APIs & Services → Credentials → **Create API key**. Edit the key: under API
-   restrictions choose **Restrict key** and tick only **Places API (New)**. Paste it as
-   `GOOGLE_PLACES_API_KEY`. The app sends it in a header, never in a URL, and never shows it.
-6. **If you have an old `data/outbound.db`**, copy it once into Supabase:
-   ```powershell
-   .venv\Scripts\python scripts\copy_sqlite_to_db.py
-   ```
-   Safe to run twice. Prints rows copied per table.
-7. **Check it:**
+   The Google key is restricted to Places API (New). Leave `DATABASE_URL` empty to use a local
+   SQLite file (`data/outbound.db`) instead.
+5. **Check it:**
    ```powershell
    .venv\Scripts\outbound check
    ```
-   It should say `postgres at ...` (or `sqlite at data/outbound.db`), `APOLLO_API_KEY  set` and
-   `GOOGLE_PLACES_API_KEY  set`.
-   It never shows the password or the full `DATABASE_URL`.
+   It shows `postgres at <host>`, each key as `set` or `not set`, and usage against the monthly
+   caps. It never shows a key or the database password.
 
-**Mac or Linux:** use `python3 -m venv .venv` and `.venv/bin/` instead of `.venv\Scripts\`.
-
----
+Mac or Linux: `python3 -m venv .venv`, and `.venv/bin/` instead of `.venv\Scripts\`.
 
 ## Start the app
 
@@ -92,73 +53,6 @@ Next: the Clay round trip per ICP (M2), then Instantly verification and campaign
 .venv\Scripts\outbound serve
 ```
 
-Your browser opens http://127.0.0.1:8000. Keep the terminal open while you use it; Ctrl+C stops
-it. Only this computer can open the app. Pages: Pipeline, Find companies, Companies, Enrich with
-Clay, Leads, Do-not-contact. What each one does: [docs/guide.md](docs/guide.md#app).
-
-If it says the screens aren't built yet, run the `cd ui`, `npm install`, `npm run build` lines
-from step 3.
-
----
-
-## Test it
-
-The first live test spends **1 Apollo credit**. In the app: **Find companies → Preview (free)**,
-then tick **Spend up to 1 Apollo credit** and **Fetch companies**. Or with commands:
-
-1. **See the setup:** `.venv\Scripts\outbound check`
-2. **Dry run (free):** `.venv\Scripts\outbound source bpa_us_recruit`
-3. **Real run, 1 page:** `.venv\Scripts\outbound source bpa_us_recruit --live`
-4. **Export:** `.venv\Scripts\outbound export`
-5. **Run again** — it should continue at page 2.
-6. **Do-not-contact:** `.venv\Scripts\outbound suppress thatdomain.com --reason "test"`
-
----
-
-## Everyday commands
-
-| Command | What it does | Cost |
-|---|---|---|
-| `outbound serve` | Starts the app at http://127.0.0.1:8000 | free |
-| `outbound check` | Config, key status, database host/path, credits, counts | free |
-| `outbound backup` | Every table → `data/backups/<UTC time>.json` | free |
-| `outbound icps` | Lists the ICPs (edit them in the app) | free |
-| `outbound source ICP` | Dry run: shows the Apollo request and its cost | free |
-| `outbound source ICP --live` | Fetches 1 page (100 companies) | 1 credit |
-| `outbound source ICP --live --pages 5` | Same for 5 pages | up to 5 credits |
-| `outbound export` | Companies CSV (`--icp ICP` for one) | free |
-| `outbound export --contacts` | Leads Clay found, with state | free |
-| `outbound clay export ICP --rows 200` | An ICP's next companies → Clay file (50 on a trial) | free |
-| `outbound clay import FILE --credits 40` | Clay's CSV → leads | free |
-| `outbound suppress acme.com --reason "client"` | Do-not-contact (can't be undone) | free |
-| `outbound fields` | Which fields Apollo sent (names and counts) | free |
-
-On Windows, put `.venv\Scripts\` in front of each command.
-
-## Changing who you target
-
-- **ICPs** are made and edited on the app's **ICPs** page, and stored in the shared database.
-  What each field means: [docs/guide.md](docs/guide.md#icps).
-- **Monthly caps** are in `config/settings.yaml`: `caps.apollo.credits` and
-  `caps.google_places.requests` (1,000 = Google's free monthly allowance).
-
-## Where your data is
-
-- **Supabase Postgres** (when `DATABASE_URL` is set) holds ICPs, companies, leads, batches,
-  suppression, usage and progress. Back it up with `outbound backup` now and then.
-- **`data/outbound.db`** is used only when `DATABASE_URL` is unset.
-- **`data/exports/`**, **`data/clay/`**, **`data/backups/`** stay on disk and are gitignored.
-
-## For developers
-
-```bash
-pip install -e ".[dev]"
-ruff format . && ruff check . && pytest    # offline SQLite; no test needs a real key
-cd ui && npm ci && npm run build           # the screens
-```
-
-Working on the screens: `outbound serve` in one terminal, `npm run dev` in `ui/` in another, then
-open http://localhost:5173 (it sends `/api` to port 8000 and reloads as you edit).
-
-CI also runs pytest against a Postgres service container, and builds `ui/`. Layout and rules: `AGENTS.md` and
-`docs/plan.md`. Module guide: `docs/guide.md`.
+The browser opens http://127.0.0.1:8000. Only this computer can open it. Keep the terminal open
+while you use it; Ctrl+C stops it. If it says the screens aren't built yet, run the `npm` lines
+from step 2.

@@ -103,7 +103,7 @@ function ClaySteps({ icp }) {
         <li>Write down your Clay credits. Run <b>5 rows</b> first, check them, then run the rest. Write down the credits again: the difference is this batch’s cost.</li>
         <li><b>Actions → Export → Download CSV</b>. You don’t need to rename columns. Then go to step 3.</li>
       </ol>
-      <p className="muted">More detail: docs/clay-table.md.</p>
+      <p className="muted">More detail: docs/guide.md, section “Enrich with Clay”.</p>
     </Card>
   );
 }

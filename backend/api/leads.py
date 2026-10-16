@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -42,4 +41,4 @@ def download_leads(
 ) -> Response:
     _check_state(state)
     text = exports.csv_text(exports.lead_rows(conn, state), exports.LEAD_COLUMNS)
-    return csv_response(text, exports.default_path(Path("."), "contacts").name)
+    return csv_response(text, exports.filename("contacts"))

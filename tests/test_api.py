@@ -292,7 +292,7 @@ def test_run_never_goes_over_the_cap(
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     conn = db.connect(project)
     with conn:
-        db.add_usage(conn, "apollo", "credits", 10)
+        db.reserve_usage(conn, "apollo", "credits", 10, 100)
     conn.close()
     response = client.post(
         "/api/source/run", json={"icp": ICP, "pages": 1, "confirm": {"apollo": 1}}

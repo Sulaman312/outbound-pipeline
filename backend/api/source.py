@@ -2,8 +2,8 @@
 
 POST /source/preview is the dry run: it reads only our database and never calls a source.
 POST /source/run spends, and only when the body repeats, for every source picked, the exact
-amount that source can spend (its own tick box on the page). Same rules as `outbound source
---live`: key set, cap set, cap never exceeded. Sources run in the order of backend/sources.py
+amount that source can spend (its own tick box on the page): key set, cap set, cap never
+exceeded. Sources run in the order of backend/sources.py
 (Apollo, then Google Maps), all saving into the same companies table.
 """
 

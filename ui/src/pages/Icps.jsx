@@ -79,8 +79,8 @@ export default function Icps() {
   return (
     <>
       <PageHeader title="ICPs">
-        Who we target. Each ICP has its own settings for each place we find companies (Apollo now,
-        Google Maps next), and the people to look for in Clay. Both laptops see the same list.
+        Who we target. Each ICP has its own settings for each place we find companies (Apollo,
+        Google Maps), and the people to look for in Clay. Both laptops see the same list.
       </PageHeader>
       {message && <Notice kind={message.kind}>{message.text}</Notice>}
       <Card title={`${icps.data.length} ICPs`} aside={<button type="button" onClick={() => setEditing("new")}>New ICP</button>}>
