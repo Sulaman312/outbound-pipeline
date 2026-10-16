@@ -67,8 +67,8 @@ export const api = {
   setIcpActive: (key, active) => postJson(`/icps/${encodeURIComponent(key)}/active`, { active }),
 
   previewSource: (icp, sources, pages) => postJson("/source/preview", { icp, sources, pages }),
-  runSource: (icp, sources, pages, confirmCredits) =>
-    postJson("/source/run", { icp, sources, pages, confirm_credits: confirmCredits }),
+  // confirm: {source: amount}, the amount each source's tick box showed
+  runSource: (icp, sources, pages, confirm) => postJson("/source/run", { icp, sources, pages, confirm }),
 
   companies: (params) => request(`/companies${query(params)}`),
   companiesCsvUrl: (params) => `/api/companies.csv${query(params)}`,

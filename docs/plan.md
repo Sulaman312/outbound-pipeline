@@ -5,7 +5,7 @@ Read [research.md](research.md) first. Every number here comes from there.
 **Status:** M0a (Foundation), M0b (App) and M1 (ICPs + Source) are built: `backend/` package,
 Supabase Postgres (SQLite for tests and offline), stage list, ICPs with settings per source,
 Apollo sourcing per ICP, Clay CSV enrich per ICP, verify rules, and a local web app (FastAPI +
-React) for all of it. M1b (Google Maps) is next; M2–M7 are still design. See the decisions table
+React) for all of it, and M1b: Google Maps as the second company source. M2–M7 are still design. See the decisions table
 at the bottom.
 
 ## Goal
@@ -22,7 +22,7 @@ Code does the repeatable parts. Paid tools are used only where they're needed.
 ```
   ICP (who we target; settings per source)
           |
-  Apollo (built)  ·  Google Maps (M1b)      one or both, picked per run
+  Apollo  ·  Google Maps (Places Text Search)      one or both, picked per run
           |
           v
   ┌───────────────────────────┐
@@ -63,6 +63,7 @@ in_campaign, replied, bounced, unsubscribed, finished, dropped.
 | Step | Tool | Done by | Why this tool |
 |---|---|---|---|
 | Find companies | Apollo Organization Search (Basic plan) | code | 1 credit per 100 companies |
+| Find local businesses | Google Places API (New) Text Search | code | 1 request per 20 places; first 1,000 a month free |
 | Find person, email, check it | Clay | you, by hand (CSV in and out) | Best email coverage; API is the $495 plan |
 | Re-check needs_check | Instantly verifier | code | 0.25 credits per email |
 | Campaigns and sending | Instantly Growth | code creates campaigns; Instantly sends | Miro campaign logic |
@@ -70,21 +71,23 @@ in_campaign, replied, bounced, unsubscribed, finished, dropped.
 
 ## Data: Supabase Postgres (SQLite for tests)
 
-Schema version 2 (`schema_version` table; version 1 is never edited, version 2 is a migration
-that runs on the first start of the new code). Tests use SQLite. Production uses the Supabase
+Schema version 3 (`schema_version` table; version 1 is never edited; versions 2 (ICPs) and 3
+(Google Maps) are migrations that run on the first start of the new code). Tests use SQLite. Production uses the Supabase
 Session pooler URL (`DATABASE_URL`, port 5432, `sslmode=require`). Row level security is on
 every table (no policies), so the public API key cannot read rows; we connect as the owner.
 
 | Table | Key columns | Rule |
 |---|---|---|
 | `icps` | key, name, description, offer, country, active, person_titles, person_locations, exclude_notes, target_leads | Who we target. Never deleted, only made inactive. Lists are JSON text. |
-| `icp_sources` | icp, source, settings | One row per ICP per source: Apollo = HQ locations, headcount, keywords, job-post signal; Google Maps = search phrases, cities. |
-| `companies` | id, source, source_id, name, domain, icp, status, … | Unique domain: a company belongs to the first ICP that saves it. Status `new` → `exported` → `enriched` or `no_contact`. |
+| `icp_sources` | icp, source, settings | One row per ICP per source: Apollo = HQ locations, headcount, keywords, job-post signal; Google Maps = search phrases, cities, region code, place type, pages per search, skip chains. |
+| `companies` | id, source (`apollo` / `google_places`), source_id (Apollo id / place id), name, domain, icp, city, state, status, likely_chain, … | Unique domain: a company belongs to the first ICP and source that saves it. Status `new` → `exported` → `enriched` or `no_contact`; `chain` for a likely chain held back from Clay. |
+| `places` | place_id, domain, icp | Every Google place seen with a website. 3 or more places on one domain = likely chain. |
 | `leads` | id, company_id, email, clay_status, state, state_reason, state_changed_at, … | Unique email. States as above. |
 | `batches` | id, icp, file, rows, clay_account, clay_credits, … | One Clay CSV round trip, one ICP |
 | `suppression` | value, kind, reason | Never deleted |
-| `usage` | provider, unit, month, amount | Monthly caps; Apollo credits reserved before the call |
-| `sourcing_progress` | icp, source, filters_hash, next_page, exhausted | Per ICP and source. Never pay for the same page twice; changed settings start at page 1. |
+| `usage` | provider, unit, month, amount | Monthly caps; Apollo credits and Google requests reserved before each call |
+| `sourcing_progress` | icp, source, filters_hash, next_page, exhausted | Apollo, per ICP. Never pay for the same page twice; changed settings start at page 1. |
+| `query_progress` | icp, source, query, filters_hash, pages_done, next_token, exhausted | Google Maps, per ICP and search (phrase x city). Pages done are never repaid; a new region or place type starts again. |
 
 Concurrency:
 
@@ -100,7 +103,7 @@ outbound check                                 # config, keys, db host/path, usa
 outbound serve                                 # the app at http://127.0.0.1:8000             [built]
 outbound backup                                # every table → data/backups/<UTC>.json      [built]
 outbound icps                                  # list ICPs (edit them in the app)             [built]
-outbound source ICP [--source S] [--pages N]   # dry run; --live spends credits               [built]
+outbound source ICP [--source S] [--pages N]   # S = apollo or google_maps; --live spends     [built]
 outbound export [--icp ICP]                    # companies CSV                                [built]
 outbound export --contacts                     # leads CSV                                    [built]
 outbound suppress VALUE --reason TEXT          # do-not-contact                               [built]
@@ -157,7 +160,7 @@ outbound-pipeline/
     http.py  normalize.py
     pipeline.py           # STAGES + LEAD_STATES
     suppression.py  exports.py  fields.py
-    integrations/apollo.py
+    integrations/apollo.py  google_places.py
     stages/source.py  enrich.py  verify.py
   ui/                     # React + Vite: api.js (every fetch), pages/ (one per sidebar item)
   scripts/copy_sqlite_to_db.py
@@ -169,7 +172,7 @@ outbound-pipeline/
 | # | Question | Decision |
 |---|---|---|
 | D1 | Which source for which offer? | **DECIDED (2026-10-16):** sources are chosen per ICP in the app (Apollo, Google Maps, or both per run). Apify is dropped. |
-| D2 | Google Maps / Places? | **DECIDED (2026-10-16):** Google Maps (Places API Text Search) is the second source, built in M1b. **Waiting on Wania:** Google's terms, and a Google Cloud key. |
+| D2 | Google Maps / Places? | **DECIDED (2026-10-16), BUILT (M1b):** Google Places API (New), Text Search, as the second source. Wania accepts the Google terms risk (storing names, websites, addresses, phones). Ask only for id, displayName, websiteUri, formattedAddress, addressComponents, nationalPhoneNumber, types, primaryType, businessStatus; never reviews or photos. Key `GOOGLE_PLACES_API_KEY`, restricted to Places API (New). Cap `caps.google_places.requests: 1000` (the free monthly allowance). Likely chains (3+ places on one website) are skipped by default, an ICP setting. |
 | D3 | Emails: Clay waterfall; plan/accounts | **DECIDED (2026-10-16):** Clay only, through CSV export/import by hand (Clay Free/trial has no API); no Google Sheet for now. Apollo only finds companies. Apollo person enrichment is not used: it charges 1 credit per person even with no email, and a test found very few emails. Company filters (HQ state, headcount, keywords) go to Apollo; people filters (titles, person location) go into the Clay table's "find people" step. Plan/account count still open; record credits per batch on import. |
 | D4 | Email check / maybes | **DECIDED (M0a):** Clay "valid" = verified (ready). Catch-all/unknown = needs_check, re-checked with Instantly's verifier. Hold for role addresses until D5. |
 | D5 | Role-based emails (`info@`) | **OPEN.** Suggestion: drop for Apollo leads. |
@@ -198,7 +201,7 @@ Pilot: lists built by 8 Nov, launch 9–15 Nov, so M0b–M5 should work by about
 | M0a | **Built.** Foundation: `backend/` layout, Supabase/SQLite, pipeline stages, Clay CSV, verify rules, backup, copy script, CI on Postgres. | D3, D4, D9, D12, D14 |
 | M0b | **Built.** App: FastAPI + React (Vite) for everything above. `outbound serve`. | D14 |
 | M1 | **Built.** ICPs (app page, stored in Supabase, settings per source) + Apollo sourcing per ICP; one Clay file per ICP with its people filters on the Clay page. Job-post signal stored but not sent until Apollo's filter names are confirmed (research.md §1). | D1, D15, D17–D19 |
-| M1b | Google Maps (Places API Text Search) as the second source, from each ICP's search phrases and cities | D2 |
+| M1b | **Built.** Google Maps (Places API (New) Text Search) as the second source: phrase x city searches per ICP, page tokens, per-search progress, request cap, closed/no-website/chain skips. First live test (1 search, 1 page, 1 request) waits for Wania's go-ahead. | D2 |
 | M2 | Enrich: Clay CSV per ICP (the per-ICP file and people filters came with M1) | D3 |
 | M3 | Verify: Instantly verifier for needs_check | D4, D5 |
 | M4 | Personalize + QA + review queue | D13 if AI line |

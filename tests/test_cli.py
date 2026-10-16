@@ -21,7 +21,9 @@ def test_check(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert "config:   ok" in out
     assert "sqlite at" in out or "postgres at" in out
     assert "APOLLO_API_KEY  not set" in out
+    assert "GOOGLE_PLACES_API_KEY  not set" in out
     assert "apollo credits  0 / 10" in out
+    assert "google_places requests  0 / 5" in out
     assert "ai_accounting" in out and "0 saved" in out
 
 
@@ -279,3 +281,28 @@ def test_serve_opens_the_browser_when_the_ui_is_built(
 class _Now:
     def start(self) -> None:
         pass
+
+
+def test_check_shows_google_key_without_its_value(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GOOGLE_PLACES_API_KEY", "g-secret-456")
+    assert call(project, "check") == 0
+    out = capsys.readouterr().out
+    assert "GOOGLE_PLACES_API_KEY  set" in out and "g-secret-456" not in out
+
+
+def test_source_google_dry_run(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from fakes import icp_data, maps_settings
+
+    from backend import db, icps
+
+    conn = db.connect(project)
+    icps.create(conn, icp_data("vets_us", sources={"google_maps": maps_settings()}))
+    conn.close()
+    assert call(project, "source", "vets_us", "--source", "google_maps") == 0
+    out = capsys.readouterr().out
+    assert "DRY RUN: nothing is sent to Google Maps" in out
+    assert "vet clinic in Austin, TX  ->  1 request(s)" in out
+    assert call(project, "source", "vets_us", "--source", "google_maps", "--live") == 2
+    assert "GOOGLE_PLACES_API_KEY isn't set" in capsys.readouterr().err

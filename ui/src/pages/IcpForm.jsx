@@ -24,7 +24,12 @@ function toForm(icp, sources) {
   for (const source of sources) {
     const saved = icp?.sources?.[source.key] || {};
     form.sources[source.key] = Object.fromEntries(
-      source.fields.map((f) => [f.key, f.kind === "int" ? String(saved[f.key] ?? "") : asText(saved[f.key])]),
+      source.fields.map((f) => {
+        const value = saved[f.key] ?? f.default;
+        if (f.kind === "bool") return [f.key, value ?? false];
+        if (f.kind === "int" || f.kind === "text") return [f.key, value == null ? "" : String(value)];
+        return [f.key, asText(value)];
+      }),
     );
   }
   return form;
@@ -42,7 +47,10 @@ function toIcp(form, sources) {
     out.sources[source.key] = Object.fromEntries(
       source.fields.map((f) => {
         const value = form.sources[source.key][f.key];
-        return [f.key, f.kind === "int" ? (value === "" ? null : Number(value)) : lines(value)];
+        if (f.kind === "bool") return [f.key, value];
+        if (f.kind === "text") return [f.key, value.trim() || null];
+        if (f.kind === "int") return [f.key, value === "" ? null : Number(value)];
+        return [f.key, lines(value)];
       }),
     );
   }
@@ -59,14 +67,31 @@ function Field({ label, help, children }) {
   );
 }
 
+function SourceInput({ field, value, onChange }) {
+  if (field.kind === "bool") {
+    return (
+      <span className="check">
+        <input type="checkbox" checked={value} onChange={onChange} /> {value ? "Yes" : "No"}
+      </span>
+    );
+  }
+  if (field.kind === "int") {
+    return <input type="number" min={field.low ?? 0} max={field.high ?? undefined} value={value} onChange={onChange} />;
+  }
+  if (field.kind === "text") return <input value={value} onChange={onChange} />;
+  return <textarea rows="3" value={value} onChange={onChange} />;
+}
+
 export default function IcpForm({ icp, sources, onSaved, onCancel }) {
   const [form, setForm] = useState(() => toForm(icp, sources));
   const [original] = useState(() => JSON.stringify(toIcp(toForm(icp, sources), sources).sources));
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const set = (name) => (e) => setForm({ ...form, [name]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  const setSource = (source, name) => (e) =>
-    setForm({ ...form, sources: { ...form.sources, [source]: { ...form.sources[source], [name]: e.target.value } } });
+  const setSource = (source, name) => (e) => {
+    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    setForm({ ...form, sources: { ...form.sources, [source]: { ...form.sources[source], [name]: value } } });
+  };
 
   const changedSources = icp && JSON.stringify(toIcp(form, sources).sources) !== original;
 
@@ -123,11 +148,7 @@ export default function IcpForm({ icp, sources, onSaved, onCancel }) {
           <div className="source-fields">
             {source.fields.map((f) => (
               <Field key={f.key} label={f.label + (f.required ? " *" : "")} help={f.help}>
-                {f.kind === "int" ? (
-                  <input type="number" min="0" value={form.sources[source.key][f.key]} onChange={setSource(source.key, f.key)} />
-                ) : (
-                  <textarea rows="3" value={form.sources[source.key][f.key]} onChange={setSource(source.key, f.key)} />
-                )}
+                <SourceInput field={f} value={form.sources[source.key][f.key]} onChange={setSource(source.key, f.key)} />
               </Field>
             ))}
           </div>

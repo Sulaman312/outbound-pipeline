@@ -4,3 +4,7 @@
 caps:
   apollo:
     credits: 50
+  # Google Places Text Search: 1 request per page of up to 20 places. The first 1,000 a month
+  # are free (Text Search Enterprise, checked 2026-10-16; see docs/research.md).
+  google_places:
+    requests: 1000

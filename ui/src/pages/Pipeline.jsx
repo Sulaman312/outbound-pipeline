@@ -10,8 +10,6 @@ export default function Pipeline() {
   if (loading && !data) return <Loading />;
 
   const { apollo, companies, states } = data;
-  const capText = apollo.cap === null ? "no cap set" : `of ${apollo.cap} in ${apollo.month}`;
-  const share = apollo.cap ? Math.min(100, (100 * apollo.used) / apollo.cap) : 0;
 
   return (
     <>
@@ -25,14 +23,18 @@ export default function Pipeline() {
         <Stat label="Waiting for Clay" value={companies.waiting_for_clay} />
         <Stat label="Verified leads" value={states.verified} hint={`${states.needs_check} need a check`} />
         <Stat label="Do-not-contact" value={data.do_not_contact} />
-        <div className="stat">
-          <div className="stat-value">{apollo.used}</div>
-          <div className="stat-label">Apollo credits used</div>
-          <div className="meter" aria-hidden="true">
-            <div style={{ width: `${share}%` }} />
+        {data.usage.map((u) => (
+          <div className="stat" key={u.source}>
+            <div className="stat-value">{u.used}</div>
+            <div className="stat-label">
+              {u.label} {u.unit} used
+            </div>
+            <div className="meter" aria-hidden="true">
+              <div style={{ width: `${u.cap ? Math.min(100, (100 * u.used) / u.cap) : 0}%` }} />
+            </div>
+            <div className="stat-hint">{u.cap === null ? "no cap set" : `of ${u.cap} in ${apollo.month}`}</div>
           </div>
-          <div className="stat-hint">{capText}</div>
-        </div>
+        ))}
       </div>
 
       <div className="board">

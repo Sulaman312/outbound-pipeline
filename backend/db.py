@@ -26,7 +26,7 @@ from sqlalchemy.engine import CursorResult, Engine, RowMapping
 
 from backend import seed_icps
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 TABLES: tuple[str, ...] = (
     "schema_version",
@@ -36,6 +36,8 @@ TABLES: tuple[str, ...] = (
     "suppression",
     "usage",
     "sourcing_progress",
+    "query_progress",
+    "places",
     "batches",
     "leads",
 )
@@ -312,6 +314,9 @@ def init_schema(conn: Connection) -> None:
         version = 1
     if version == 1:
         _migrate_to_2(conn)
+        version = 2
+    if version == 2:
+        _migrate_to_3(conn)
     if conn.dialect == "postgresql":
         _enable_rls(conn)
 
@@ -375,6 +380,38 @@ def _migrate_to_2(conn: Connection) -> None:
     conn.execute("ALTER TABLE sourcing_progress_new RENAME TO sourcing_progress")
     seed_starting_icps(conn)
     conn.execute("UPDATE schema_version SET version = 2")
+
+
+def _migrate_to_3(conn: Connection) -> None:
+    """Version 3 (Google Maps): every place seen, chains, and progress per search query."""
+    conn.execute(
+        """
+        CREATE TABLE places (
+            place_id  TEXT PRIMARY KEY,
+            domain    TEXT NOT NULL,
+            icp       TEXT NOT NULL,
+            seen_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX places_by_domain ON places (domain)")
+    conn.execute("ALTER TABLE companies ADD COLUMN likely_chain INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        """
+        CREATE TABLE query_progress (
+            icp           TEXT NOT NULL,
+            source        TEXT NOT NULL,
+            query         TEXT NOT NULL,
+            filters_hash  TEXT NOT NULL,
+            pages_done    INTEGER NOT NULL DEFAULT 0,
+            next_token    TEXT,
+            exhausted     INTEGER NOT NULL DEFAULT 0,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (icp, source, query)
+        )
+        """
+    )
+    conn.execute("UPDATE schema_version SET version = 3")
 
 
 def seed_starting_icps(conn: Connection) -> None:
@@ -523,17 +560,24 @@ def insert_company(conn: Connection, company: dict[str, Any]) -> bool:
 
 
 def list_companies(
-    conn: Connection, icp: str | None = None, search: str | None = None
+    conn: Connection,
+    icp: str | None = None,
+    search: str | None = None,
+    source: str | None = None,
 ) -> list[RowMapping]:
     """Saved companies, oldest first, leaving out any domain on the do-not-contact list.
 
-    `search` keeps companies whose name or domain contains that text (any case).
+    `search` keeps companies whose name or domain contains that text (any case). `source` is
+    where it came from, like apollo or google_places.
     """
     sql = "SELECT * FROM companies WHERE domain NOT IN (SELECT value FROM suppression)"
     params: dict[str, Any] = {}
     if icp:
         sql += " AND icp = :icp"
         params["icp"] = icp
+    if source:
+        sql += " AND source = :source"
+        params["source"] = source
     if search and search.strip():
         sql += " AND (LOWER(name) LIKE :search OR LOWER(domain) LIKE :search)"
         params["search"] = f"%{search.strip().lower()}%"
@@ -560,6 +604,77 @@ def count_companies_by_status(conn: Connection) -> dict[str, int]:
     """Number of saved companies per status (new, exported, enriched, no_contact)."""
     rows = conn.execute("SELECT status, COUNT(*) AS n FROM companies GROUP BY status").fetchall()
     return {str(row["status"]): int(row["n"]) for row in rows}
+
+
+# --- places and chains (Google Maps) ------------------------------------------------------------
+
+
+def record_place(conn: Connection, place_id: str, domain: str, icp: str) -> int:
+    """Remember a place and its website. Returns how many places now share that domain."""
+    conn.execute(
+        "INSERT INTO places (place_id, domain, icp, seen_at) "
+        "VALUES (:place_id, :domain, :icp, :seen_at) ON CONFLICT (place_id) DO NOTHING",
+        {"place_id": place_id, "domain": domain, "icp": icp, "seen_at": now_utc()},
+    )
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM places WHERE domain = :domain", {"domain": domain}
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def mark_likely_chain(conn: Connection, domain: str, *, hold: bool) -> None:
+    """Flag a company as a likely chain. With hold, one not sent to Clay yet stops at 'chain'."""
+    conn.execute("UPDATE companies SET likely_chain = 1 WHERE domain = :domain", {"domain": domain})
+    if hold:
+        conn.execute(
+            "UPDATE companies SET status = 'chain' WHERE domain = :domain AND status = 'new'",
+            {"domain": domain},
+        )
+
+
+def get_query_progress(conn: Connection, icp: str, source: str) -> dict[str, RowMapping]:
+    """{query: progress row} for one ICP and source."""
+    rows = conn.execute(
+        "SELECT * FROM query_progress WHERE icp = :icp AND source = :source",
+        {"icp": icp, "source": source},
+    ).fetchall()
+    return {str(row["query"]): row for row in rows}
+
+
+def save_query_progress(
+    conn: Connection,
+    icp: str,
+    source: str,
+    query: str,
+    filters_hash: str,
+    pages_done: int,
+    next_token: str | None,
+    exhausted: bool,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO query_progress
+            (icp, source, query, filters_hash, pages_done, next_token, exhausted, updated_at)
+        VALUES (:icp, :source, :query, :filters_hash, :pages_done, :next_token, :exhausted,
+                :updated_at)
+        ON CONFLICT (icp, source, query) DO UPDATE SET
+            filters_hash = excluded.filters_hash,
+            pages_done = excluded.pages_done,
+            next_token = excluded.next_token,
+            exhausted = excluded.exhausted,
+            updated_at = excluded.updated_at
+        """,
+        {
+            "icp": icp,
+            "source": source,
+            "query": query,
+            "filters_hash": filters_hash,
+            "pages_done": pages_done,
+            "next_token": next_token,
+            "exhausted": 1 if exhausted else 0,
+            "updated_at": now_utc(),
+        },
+    )
 
 
 # --- ICPs ---------------------------------------------------------------------------------------

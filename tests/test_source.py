@@ -197,8 +197,8 @@ def test_icp_that_cant_run(conn: Connection, change: dict, message: str) -> None
     assert message in source.describe(conn, icp, "apollo", pages=1, cap=10)
 
 
-def test_unbuilt_source_is_refused(conn: Connection, segment: Icp) -> None:
-    assert "isn't built yet" in (source.icp_problem(segment, "google_maps") or "")
+def test_source_the_icp_has_no_settings_for(conn: Connection, segment: Icp) -> None:
+    assert "has no Google Maps settings" in (source.icp_problem(segment, "google_maps") or "")
     assert "no source called" in (source.icp_problem(segment, "nope") or "")
 
 

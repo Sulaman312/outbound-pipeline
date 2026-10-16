@@ -13,6 +13,7 @@ from backend import db
 from backend.config import Settings, key_status
 from backend.db import Connection
 from backend.pipeline import LEAD_STATES, STAGES
+from backend.sources import SOURCES
 from backend.stages import source
 
 
@@ -47,6 +48,17 @@ def overview(conn: Connection, settings: Settings) -> dict[str, Any]:
             "used": db.usage_this_month(conn, source.PROVIDER, source.UNIT),
             "cap": settings.caps.get("apollo", {}).get("credits"),
         },
+        "usage": [
+            {
+                "source": s.key,
+                "label": s.label,
+                "unit": s.cap_unit,
+                "used": source.used_this_month(conn, s.key),
+                "cap": source.cap_for(settings.caps, s.key),
+            }
+            for s in SOURCES
+            if s.built
+        ],
         "keys": key_status(),
         "database": db.describe_database(conn.url, settings.root),
         "icps": {"active": sum(1 for i in icps if i["active"]), "total": len(icps)},

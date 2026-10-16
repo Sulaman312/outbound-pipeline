@@ -5,7 +5,8 @@ automation, and outsourced front-end developers.
 
 **What works today: finding companies, then finding the person and email through Clay.**
 - You describe who to target as **ICPs** on the app's ICPs page (shared by both laptops).
-- For each ICP, it asks Apollo for matching companies (Google Maps comes next, in M1b).
+- For each ICP, it finds companies on Apollo, Google Maps, or both. Google Maps searches each
+  phrase in each city, skips closed places, places without a website, and likely chains.
 - It saves the usable ones and skips no-website, do-not-contact, and duplicates.
 - It remembers where it stopped, and never goes over the monthly credit cap.
 - It writes an ICP's next companies to a file for Clay, with that ICP's people to look for
@@ -19,7 +20,7 @@ automation, and outsourced front-end developers.
 - The database is Supabase Postgres (shared); tests and a no-`DATABASE_URL` laptop use SQLite.
 - All of it works from a **web app on your own computer** (`outbound serve`), or from commands.
 
-Next: Google Maps as a second source (M1b), then Instantly verification and campaigns. See
+Next: the Clay round trip per ICP (M2), then Instantly verification and campaigns. See
 [docs/plan.md](docs/plan.md).
 
 - [docs/clay-table.md](docs/clay-table.md) — what to click in Clay for each batch
@@ -58,9 +59,16 @@ Next: Google Maps as a second source (M1b), then Instantly verification and camp
    ```
    DATABASE_URL=postgresql://postgres.[ref]:[YOUR-PASSWORD]@aws-0-....pooler.supabase.com:5432/postgres?sslmode=require
    APOLLO_API_KEY=your-key-here
+   GOOGLE_PLACES_API_KEY=your-google-key-here
    ```
    The code rewrites this to the psycopg driver automatically. Leave `DATABASE_URL` empty to use
    a local SQLite file at `data/outbound.db` instead.
+
+   **The Google key** (for Google Maps): in the Google Cloud Console, pick the project, turn on
+   **billing** (needed even for the free 1,000 requests a month), enable **Places API (New)**,
+   then APIs & Services → Credentials → **Create API key**. Edit the key: under API
+   restrictions choose **Restrict key** and tick only **Places API (New)**. Paste it as
+   `GOOGLE_PLACES_API_KEY`. The app sends it in a header, never in a URL, and never shows it.
 6. **If you have an old `data/outbound.db`**, copy it once into Supabase:
    ```powershell
    .venv\Scripts\python scripts\copy_sqlite_to_db.py
@@ -70,7 +78,8 @@ Next: Google Maps as a second source (M1b), then Instantly verification and camp
    ```powershell
    .venv\Scripts\outbound check
    ```
-   It should say `postgres at ...` (or `sqlite at data/outbound.db`), and `APOLLO_API_KEY  set`.
+   It should say `postgres at ...` (or `sqlite at data/outbound.db`), `APOLLO_API_KEY  set` and
+   `GOOGLE_PLACES_API_KEY  set`.
    It never shows the password or the full `DATABASE_URL`.
 
 **Mac or Linux:** use `python3 -m venv .venv` and `.venv/bin/` instead of `.venv\Scripts\`.
@@ -130,7 +139,8 @@ On Windows, put `.venv\Scripts\` in front of each command.
 
 - **ICPs** are made and edited on the app's **ICPs** page, and stored in the shared database.
   What each field means: [docs/guide.md](docs/guide.md#icps).
-- **Monthly credit cap** is in `config/settings.yaml` (`caps.apollo.credits`).
+- **Monthly caps** are in `config/settings.yaml`: `caps.apollo.credits` and
+  `caps.google_places.requests` (1,000 = Google's free monthly allowance).
 
 ## Where your data is
 

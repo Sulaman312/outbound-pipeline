@@ -63,8 +63,8 @@ backend/
   suppression.py         do-not-contact
   exports.py             CSV exports
   fields.py              Apollo field names/counts
-  integrations/apollo.py
-  stages/source.py       company sourcing per ICP and source (Apollo built)
+  integrations/apollo.py, integrations/google_places.py
+  stages/source.py       company sourcing per ICP and source (Apollo, Google Maps)
   stages/enrich.py       Clay CSV out and in
   stages/verify.py       lead-state rules from Clay's result
 scripts/copy_sqlite_to_db.py

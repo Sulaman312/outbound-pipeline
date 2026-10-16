@@ -103,12 +103,36 @@ def _setting(spec: Field, value: Any, source_label: str) -> Any:
     if spec.kind == "ranges":
         return _ranges(value, label)
     if spec.kind == "int":
-        return _int(value, label, allow_empty=True)
+        number = _int(value, label, allow_empty=True)
+        if number is not None and (
+            (spec.low is not None and number < spec.low)
+            or (spec.high is not None and number > spec.high)
+        ):
+            raise IcpError(f"{label} must be from {spec.low} to {spec.high}")
+        return number
+    if spec.kind == "text":
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise IcpError(f"{label} must be text")
+        text = value.strip().lower() if spec.pattern else value.strip()
+        if text and spec.pattern and not re.fullmatch(spec.pattern, text):
+            raise IcpError(f'{label}: "{value.strip()}" must be {spec.pattern_help}')
+        return text or None
+    if spec.kind == "bool":
+        if value is None or value == "":
+            return None
+        if not isinstance(value, bool):
+            raise IcpError(f"{label} must be yes or no")
+        return value
     raise AssertionError(f"unknown field kind {spec.kind}")
 
 
 def check_source_settings(source_key: str, settings: Any) -> dict[str, Any]:
-    """One source's settings, cleaned. Empty values are left out; {} means "not used"."""
+    """One source's settings, cleaned, with defaults filled in. {} means "not used".
+
+    A source counts as used when something other than a default or a yes/no is filled in.
+    """
     source = BY_KEY.get(source_key)
     if source is None:
         raise IcpError(f"there is no source called {source_key!r}")
@@ -117,18 +141,25 @@ def check_source_settings(source_key: str, settings: Any) -> dict[str, Any]:
     unknown = sorted(set(settings) - {f.key for f in source.fields})
     if unknown:
         raise IcpError(f"{source.label} has no setting called {unknown[0]!r}")
-    cleaned = {}
+    given = {}
     for spec in source.fields:
         value = _setting(spec, settings.get(spec.key), source.label)
         if value not in (None, []):
-            cleaned[spec.key] = value
-    if cleaned:
-        for spec in source.fields:
-            if spec.required and spec.key not in cleaned:
-                raise IcpError(
-                    f"{source.label}: {spec.label} can't be empty when {source.label} is used"
-                )
-    return cleaned
+            given[spec.key] = value
+    used = any(
+        spec.kind != "bool" and spec.key in given and given[spec.key] != spec.default
+        for spec in source.fields
+    )
+    if not used:
+        return {}
+    for spec in source.fields:
+        if spec.required and spec.key not in given:
+            raise IcpError(
+                f"{source.label}: {spec.label} can't be empty when {source.label} is used"
+            )
+        if spec.key not in given and spec.default is not None:
+            given[spec.key] = spec.default
+    return given
 
 
 def check(data: dict[str, Any]) -> Icp:

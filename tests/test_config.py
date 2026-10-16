@@ -16,7 +16,7 @@ def write(project: Path, name: str, text: str) -> None:
 
 def test_valid_settings_load(project: Path) -> None:
     settings = load_settings(project)
-    assert settings.caps == {"apollo": {"credits": 10}}
+    assert settings.caps == {"apollo": {"credits": 10}, "google_places": {"requests": 5}}
     assert settings.root == project
 
 

@@ -57,6 +57,7 @@ const STATE_TONES = {
   exported: "info",
   dropped: "bad",
   no_contact: "bad",
+  chain: "warn",
 };
 
 export function Badge({ value, tone }) {

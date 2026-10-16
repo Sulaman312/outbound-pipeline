@@ -101,7 +101,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .notice-error { background: var(--bad-soft); border-color: #f4c7c2; color: var(--bad); }
 
 /* numbers */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 0 0 18px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 18px; }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .stat-value { font-size: 26px; font-weight: 700; }
 .stat-label { color: var(--muted); font-size: 13px; }
@@ -149,7 +149,7 @@ tbody tr:hover td { background: #fafbfd; }
 .facts { margin: 0; }
 .fact-row { display: flex; gap: 16px; padding: 6px 0; border-bottom: 1px solid #eef0f3; }
 .fact-row:last-child { border-bottom: none; }
-.facts dt { width: 160px; color: var(--muted); font-weight: 500; }
+.facts dt { width: 230px; flex-shrink: 0; color: var(--muted); font-weight: 500; }
 .facts dd { margin: 0; }
 .checklist { margin: 0 0 6px; padding-left: 22px; }
 .checklist li { margin-bottom: 8px; }
@@ -169,3 +169,5 @@ button.small { padding: 3px 10px; min-height: 0; font-size: 13px; }
 .filters { margin: 6px 0 2px; padding: 8px 12px; background: var(--accent-soft); border-radius: 6px; }
 .filters div { margin: 2px 0; }
 .badge + .badge { margin-left: 4px; }
+.confirm-line { margin: 4px 0 12px; }
+.check { display: inline-flex; align-items: center; gap: 8px; }

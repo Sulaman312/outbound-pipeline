@@ -9,7 +9,16 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fakes import FakeApollo, icp_data, no_network_client, org, page
+from fakes import (
+    FakeApollo,
+    icp_data,
+    maps_settings,
+    no_network_client,
+    org,
+    page,
+    place,
+    places_page,
+)
 from fastapi.testclient import TestClient
 
 from backend import db
@@ -71,7 +80,13 @@ def test_overview_follows_the_stage_list(client: TestClient) -> None:
     assert [s["key"] for s in data["stages"]] == [s.key for s in STAGES]
     assert [s["built"] for s in data["stages"]] == [s.built for s in STAGES]
     assert data["apollo"] == {"month": db.current_month(), "used": 0, "cap": 10}
-    assert data["keys"] == {"APOLLO_API_KEY": False, "DATABASE_URL": data["keys"]["DATABASE_URL"]}
+    assert (
+        data["keys"]["APOLLO_API_KEY"] is False and data["keys"]["GOOGLE_PLACES_API_KEY"] is False
+    )
+    assert [(u["source"], u["used"], u["cap"]) for u in data["usage"]] == [
+        ("apollo", 0, 10),
+        ("google_maps", 0, 5),
+    ]
     assert data["companies"]["total"] == 0
 
 
@@ -109,8 +124,11 @@ ICP = "bpa_us_recruit"  # a starting ICP that is active and has no job-post sign
 
 def test_sources_list_every_source_with_its_fields(client: TestClient) -> None:
     data = {s["key"]: s for s in client.get("/api/sources").json()}
-    assert data["apollo"]["built"] is True and data["google_maps"]["built"] is False
-    assert [f["key"] for f in data["google_maps"]["fields"]] == ["queries", "cities"]
+    assert data["apollo"]["built"] is True and data["google_maps"]["built"] is True
+    assert data["google_maps"]["provider"] == "google_places"
+    assert [f["key"] for f in data["google_maps"]["fields"]] == [
+        "queries", "cities", "region_code", "place_type", "pages_per_query", "skip_chains",
+    ]  # fmt: skip
 
 
 def test_icps_list_with_counts(client: TestClient, project: Path) -> None:
@@ -156,8 +174,9 @@ def test_preview_is_free_and_offline(client: TestClient) -> None:
     response = client.post("/api/source/preview", json={"icp": ICP, "pages": 2})
     assert response.status_code == 200
     data = response.json()
-    assert data["credits"] == 2
     [apollo_preview] = data["previews"]
+    assert apollo_preview["credits"] == 2
+    assert apollo_preview["confirm_label"] == "Spend up to 2 Apollo credits"
     assert "pages:    1 to 2" in apollo_preview["text"]
     assert "organization_locations[] = Texas" in apollo_preview["text"]
     assert "APOLLO_API_KEY" in apollo_preview["problem"]
@@ -168,7 +187,7 @@ def test_preview_shows_why_a_source_or_icp_cant_run(client: TestClient) -> None:
         "/api/source/preview", json={"icp": ICP, "sources": ["apollo", "google_maps"]}
     ).json()
     maps = data["previews"][1]
-    assert "isn't built yet" in maps["problem"]
+    assert "has no Google Maps settings" in maps["problem"] and maps["credits"] == 0
     signal = client.post("/api/source/preview", json={"icp": "dev_us_signal"}).json()
     assert "job-post signal" in signal["previews"][0]["problem"]
     assert "NOT SENT" in signal["previews"][0]["text"]
@@ -196,15 +215,17 @@ def test_run_needs_the_exact_credits_confirmed(
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     for confirm in (0, 1, 3):  # 2 pages can spend 2 credits
         response = client.post(
-            "/api/source/run", json={"icp": ICP, "pages": 2, "confirm_credits": confirm}
+            "/api/source/run", json={"icp": ICP, "pages": 2, "confirm": {"apollo": confirm}}
         )
         assert response.status_code == 400
-        assert "Spend up to 2 credits" in response.json()["detail"]
+        assert "Spend up to 2 Apollo credits" in response.json()["detail"]
     assert client.get("/api/overview").json()["apollo"]["used"] == 0
 
 
 def test_run_needs_a_key(client: TestClient) -> None:
-    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
+    response = client.post(
+        "/api/source/run", json={"icp": ICP, "pages": 1, "confirm": {"apollo": 1}}
+    )
     assert response.status_code == 400
     assert "APOLLO_API_KEY isn't set" in response.json()["detail"]
 
@@ -214,27 +235,32 @@ def test_run_needs_a_cap(
 ) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     (project / "config" / "settings.yaml").write_text("caps:\n  other:\n    x: 1\n")
-    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
+    response = client.post(
+        "/api/source/run", json={"icp": ICP, "pages": 1, "confirm": {"apollo": 1}}
+    )
     assert response.status_code == 400
     assert "caps.apollo.credits" in response.json()["detail"]
 
 
-def test_run_refuses_an_unbuilt_source_before_spending(
+def test_run_checks_every_source_before_spending(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
+    monkeypatch.setenv("GOOGLE_PLACES_API_KEY", "test-key")
     response = client.post(
         "/api/source/run",
-        json={"icp": ICP, "sources": ["apollo", "google_maps"], "pages": 1, "confirm_credits": 1},
-    )
-    assert response.status_code == 400 and "isn't built yet" in response.json()["detail"]
+        json={"icp": ICP, "sources": ["apollo", "google_maps"], "pages": 1,
+              "confirm": {"apollo": 1, "google_maps": 0}},
+    )  # fmt: skip
+    assert response.status_code == 400
+    assert "has no Google Maps settings" in response.json()["detail"]
     assert client.get("/api/overview").json()["apollo"]["used"] == 0
 
 
 def test_run_refuses_an_inactive_icp(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     response = client.post(
-        "/api/source/run", json={"icp": "ai_accounting", "pages": 1, "confirm_credits": 1}
+        "/api/source/run", json={"icp": "ai_accounting", "pages": 1, "confirm": {"apollo": 1}}
     )
     assert response.status_code == 400 and "inactive" in response.json()["detail"]
 
@@ -243,7 +269,9 @@ def test_run_fetches_and_saves(client: TestClient, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("APOLLO_API_KEY", "test-key")
     fake = FakeApollo((200, page([org(1), org(2), org(3, domain="", website_url=None)])))
     client.app.state.new_http_client = fake.client
-    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
+    response = client.post(
+        "/api/source/run", json={"icp": ICP, "pages": 1, "confirm": {"apollo": 1}}
+    )
     assert response.status_code == 200
     [run] = response.json()["runs"]
     assert run["result"]["saved"] == 2 and run["result"]["no_domain"] == 1
@@ -264,10 +292,70 @@ def test_run_never_goes_over_the_cap(
     with conn:
         db.add_usage(conn, "apollo", "credits", 10)
     conn.close()
-    response = client.post("/api/source/run", json={"icp": ICP, "pages": 1, "confirm_credits": 1})
+    response = client.post(
+        "/api/source/run", json={"icp": ICP, "pages": 1, "confirm": {"apollo": 1}}
+    )
     assert response.status_code == 200  # no_network_client: any request would fail the test
     [run] = response.json()["runs"]
     assert run["result"]["stopped_by_cap"] is True and run["used"] == 10
+
+
+def _maps_icp(client: TestClient) -> None:
+    body = icp_data("vets_us", sources={"apollo": icp_data()["sources"]["apollo"],
+                                         "google_maps": maps_settings(queries=["vets", "vet clinic"])})  # fmt: skip
+    assert client.post("/api/icps", json=body).status_code == 200
+
+
+def test_google_preview_lists_searches_and_its_own_confirm(client: TestClient) -> None:
+    _maps_icp(client)
+    data = client.post(
+        "/api/source/preview", json={"icp": "vets_us", "sources": ["google_maps", "apollo"]}
+    ).json()
+    assert [p["source"] for p in data["previews"]] == ["apollo", "google_maps"]  # Apollo first
+    maps = data["previews"][1]
+    assert maps["credits"] == 2
+    assert maps["confirm_label"] == "Spend up to 2 Google Maps requests (free up to 1,000 a month)"
+    assert "vets in Austin, TX  ->  1 request(s)" in maps["text"]
+    assert "GOOGLE_PLACES_API_KEY" in maps["problem"]
+
+
+def test_both_sources_run_apollo_then_google_each_confirmed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _maps_icp(client)
+    monkeypatch.setenv("APOLLO_API_KEY", "a-key")
+    monkeypatch.setenv("GOOGLE_PLACES_API_KEY", "g-key")
+    body = {"icp": "vets_us", "sources": ["apollo", "google_maps"], "pages": 1}
+    missing = client.post("/api/source/run", json={**body, "confirm": {"apollo": 1}})
+    assert missing.status_code == 400
+    assert "Spend up to 2 Google Maps requests" in missing.json()["detail"]
+
+    fake = FakeApollo(
+        (200, page([org(1)])),
+        (200, places_page([place(1, website="https://company1.com"), place(2)])),
+        (200, places_page([place(3, businessStatus="CLOSED_TEMPORARILY")])),
+    )
+    client.app.state.new_http_client = fake.client
+    response = client.post(
+        "/api/source/run", json={**body, "confirm": {"apollo": 1, "google_maps": 2}}
+    )
+    assert response.status_code == 200
+    apollo_run, maps_run = response.json()["runs"]
+    assert (apollo_run["source"], maps_run["source"]) == ("apollo", "google_maps")
+    assert fake.requests[0].url.host == "api.apollo.io"
+    assert {r.url.host for r in fake.requests[1:]} == {"places.googleapis.com"}
+    assert fake.requests[1].headers["X-Goog-Api-Key"] == "g-key"
+    result = maps_run["result"]
+    assert (result["saved"], result["duplicate"], result["closed"]) == (1, 1, 1)
+    assert (maps_run["used"], maps_run["cap"]) == (2, 5)
+    usage = {u["source"]: u["used"] for u in client.get("/api/overview").json()["usage"]}
+    assert usage == {"apollo": 1, "google_maps": 2}
+
+    rows = client.get("/api/companies", params={"source": "google_places"}).json()["rows"]
+    assert [(r["domain"], r["city"], r["state"], r["likely_chain"]) for r in rows] == [
+        ("clinic2.com", "Austin", "TX", 0)
+    ]
+    assert client.get("/api/companies", params={"source": "apollo"}).json()["total"] == 1
 
 
 # --- companies ----------------------------------------------------------------------------------

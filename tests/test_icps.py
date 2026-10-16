@@ -73,6 +73,39 @@ def test_check_rejects_with_plain_messages(change: dict[str, Any], message: str)
         icps.check(icp_data(**change))
 
 
+def test_google_maps_settings_get_defaults_and_checks() -> None:
+    icp = icps.check(icp_data(sources={"google_maps": {"queries": "vet clinic\nanimal hospital",
+                                                        "cities": ["Austin, TX"]}}))  # fmt: skip
+    assert icp.sources == {
+        "google_maps": {
+            "queries": ["vet clinic", "animal hospital"],
+            "cities": ["Austin, TX"],
+            "region_code": "us",
+            "pages_per_query": 1,
+            "skip_chains": True,
+        }
+    }
+    # defaults alone (as the form sends them) don't count as using Google Maps
+    unused = icps.check(icp_data(sources={"google_maps": {"region_code": "us", "skip_chains": True,
+                                                          "pages_per_query": 1, "queries": []}}))  # fmt: skip
+    assert unused.sources == {}
+
+
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ({"queries": ["vets"]}, "Cities can't be empty"),
+        ({"queries": ["vets"], "cities": ["Austin"], "pages_per_query": 4}, "from 1 to 3"),
+        ({"queries": ["vets"], "cities": ["Austin"], "region_code": "usa"}, "two letters"),
+        ({"queries": ["vets"], "cities": ["Austin"], "place_type": "Vet Care"}, "joined by _"),
+        ({"queries": ["vets"], "cities": ["Austin"], "skip_chains": "no"}, "yes or no"),
+    ],
+)
+def test_google_maps_settings_are_checked(settings: dict[str, Any], message: str) -> None:
+    with pytest.raises(icps.IcpError, match=message):
+        icps.check(icp_data(sources={"google_maps": settings}))
+
+
 def test_every_seed_icp_passes_the_checks() -> None:
     for data in (*seed_icps.LEGACY_SEGMENTS, *seed_icps.PILOT_ICPS):
         assert icps.check(data).key == data["key"]
@@ -173,7 +206,8 @@ def old_url(tmp_path: Path) -> str:
 def test_version_1_database_moves_to_icps(tmp_path: Path, old_url: str) -> None:
     conn = db.connect(tmp_path, url=old_url)
     try:
-        assert db._read_schema_version(conn) == 2
+        assert db._read_schema_version(conn) == db.SCHEMA_VERSION == 3
+        assert all(row["likely_chain"] == 0 for row in db.list_companies(conn))  # version 3
         rows = {row["domain"]: row["icp"] for row in db.list_companies(conn)}
         assert rows == {"firm1.com": "ai_accounting", "firm2.com": "ai_accounting",
                         "firm3.com": "old_thing"}  # fmt: skip
@@ -199,7 +233,7 @@ def test_version_1_database_moves_to_icps(tmp_path: Path, old_url: str) -> None:
         conn.close()
     again = db.connect(tmp_path, url=old_url)  # a second start changes nothing
     try:
-        assert db._read_schema_version(again) == 2
+        assert db._read_schema_version(again) == 3
         assert len(db.list_companies(again)) == 3
     finally:
         again.close()

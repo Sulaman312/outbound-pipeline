@@ -123,7 +123,7 @@ def cmd_source(
         result = source.run_live(
             conn, icp, args.source, client=client, api_key=api_key, cap=cap, pages=args.pages
         )
-    used = db.usage_this_month(conn, args.source, BY_KEY[args.source].cap_unit)
+    used = source.used_this_month(conn, args.source)
     print(source.summarize(result, used=used, cap=cap))
     return 1 if result.error else 0
 

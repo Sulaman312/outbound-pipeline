@@ -1,9 +1,10 @@
 """Finding companies for an ICP, from one or more sources.
 
 POST /source/preview is the dry run: it reads only our database and never calls a source.
-POST /source/run spends credits, and only when the body repeats the exact number of credits
-the run can spend. Same rules as `outbound source --live`: key set, cap set, cap never exceeded.
-Sources run one after another in the order given, all saving into the same companies table.
+POST /source/run spends, and only when the body repeats, for every source picked, the exact
+amount that source can spend (its own tick box on the page). Same rules as `outbound source
+--live`: key set, cap set, cap never exceeded. Sources run in the order of backend/sources.py
+(Apollo, then Google Maps), all saving into the same companies table.
 """
 
 from __future__ import annotations
@@ -15,12 +16,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from backend import db
 from backend.api.deps import get_conn, get_settings, icp_or_400, sentence
 from backend.config import Settings
 from backend.db import Connection
 from backend.icps import Icp
-from backend.sources import BY_KEY
+from backend.sources import BY_KEY, SOURCES
 from backend.stages import source
 
 router = APIRouter(tags=["source"])
@@ -33,7 +33,7 @@ class SourceRequest(BaseModel):
 
 
 class RunRequest(SourceRequest):
-    confirm_credits: int  # must equal the most this run can spend, all sources together
+    confirm: dict[str, int]  # per source: must equal the most that source can spend
 
 
 def _checked(body: SourceRequest, conn: Connection) -> Icp:
@@ -44,14 +44,20 @@ def _checked(body: SourceRequest, conn: Connection) -> Icp:
     unknown = [key for key in body.sources if key not in BY_KEY]
     if unknown:
         raise HTTPException(400, f"No source called {unknown[0]!r}")
+    body.sources = [s.key for s in SOURCES if s.key in body.sources]  # always Apollo first
     problem = source.pages_problem(body.pages)
     if problem:
         raise HTTPException(400, sentence(problem))
     return icp
 
 
-def _credits(body: SourceRequest) -> int:
-    return sum(source.credits_for(key, body.pages) for key in body.sources)
+def confirm_label(key: str, amount: int) -> str:
+    """The words on the tick box, like "Spend up to 6 Google Maps requests"."""
+    info = BY_KEY[key]
+    label = f"Spend up to {amount} {info.label} {info.cap_unit}"
+    if key == source.GOOGLE:
+        label += " (free up to 1,000 a month)"
+    return label
 
 
 @router.post("/source/preview")
@@ -68,16 +74,18 @@ def preview(
         if problem is None:
             api_key = os.environ.get(BY_KEY[key].key_env, "").strip()
             problem = source.live_problem(key, api_key, cap)
+        amount = source.credits_for(conn, icp, key, body.pages)
         previews.append(
             {
                 "source": key,
                 "label": BY_KEY[key].label,
                 "text": source.describe(conn, icp, key, pages=body.pages, cap=cap),
-                "credits": source.credits_for(key, body.pages),
+                "credits": amount,
+                "confirm_label": confirm_label(key, amount),
                 "problem": sentence(problem) if problem else None,
             }
         )
-    return {"previews": previews, "credits": _credits(body)}
+    return {"previews": previews}
 
 
 @router.post("/source/run")
@@ -88,18 +96,18 @@ def run(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     icp = _checked(body, conn)
-    credits = _credits(body)
-    if body.confirm_credits != credits:
-        raise HTTPException(
-            400, f"Tick “Spend up to {credits} credits” to confirm this run. Nothing was spent."
-        )
     ready = []
-    for key in body.sources:  # check every source before spending on any
+    for key in body.sources:  # check every source, and its own tick box, before spending
         cap = source.cap_for(settings.caps, key)
         api_key = os.environ.get(BY_KEY[key].key_env, "").strip()
         problem = source.icp_problem(icp, key) or source.live_problem(key, api_key, cap)
         if problem:
             raise HTTPException(400, sentence(problem))
+        amount = source.credits_for(conn, icp, key, body.pages)
+        if body.confirm.get(key) != amount:
+            raise HTTPException(
+                400, f"Tick “{confirm_label(key, amount)}” to confirm. Nothing was spent."
+            )
         ready.append((key, api_key, cap))
     runs = []
     for key, api_key, cap in ready:
@@ -107,7 +115,7 @@ def run(
             result = source.run_live(
                 conn, icp, key, client=client, api_key=api_key, cap=cap, pages=body.pages
             )
-        used = db.usage_this_month(conn, key, BY_KEY[key].cap_unit)
+        used = source.used_this_month(conn, key)
         runs.append(
             {
                 "source": key,

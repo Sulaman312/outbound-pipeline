@@ -251,6 +251,24 @@ monthly allowance. A request is billed at the most expensive field you ask for.
   It fits front-end outsourcing much less.
 - It needs a decision on the terms issue before we build it.
 
+**Decision and build (M1b, 2026-10-16):**
+
+- **Wania accepted the terms risk** above (D2): we store the business name, website, address and
+  phone from Places in our companies table to build the lead list. The place ID is stored too
+  (that part is allowed).
+- **What we ask for, and nothing more:** `id`, `displayName`, `websiteUri`, `formattedAddress`,
+  `addressComponents`, `nationalPhoneNumber`, `types`, `primaryType`, `businessStatus`, plus
+  `nextPageToken`. Never reviews or photos. `websiteUri` and `nationalPhoneNumber` make every
+  request Text Search **Enterprise**.
+- **Price, rechecked 2026-10-16:** Google's pricing table lists Places API Text Search Enterprise
+  with a **free usage cap of 1,000 calls a month**, then **$35.00 per 1,000** (0–100,000), with
+  cheaper tiers above that. Google's Text Search pages put `websiteUri` and
+  `nationalPhoneNumber` in the Enterprise SKU, and `displayName`, `formattedAddress`,
+  `addressComponents` and `businessStatus` in Pro. (Read through search results:
+  developers.google.com couldn't be opened from the build machine, so check the pricing page
+  once in a browser.) So the app caps Google at `caps.google_places.requests: 1000`.
+- The key is `GOOGLE_PLACES_API_KEY` in `.env`, restricted to Places API (New) only.
+
 Sources:
 [Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search) ·
 [searchText reference](https://developers.google.com/maps/documentation/places/web-service/reference/rest/v1/places/searchText) ·

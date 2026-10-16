@@ -21,9 +21,10 @@ def list_companies(
     conn: Annotated[Connection, Depends(get_conn)],
     icp: str | None = None,
     search: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     icp_or_400(conn, icp)
-    rows = exports.company_rows(conn, icp, search)
+    rows = exports.company_rows(conn, icp, search, source)
     return {"total": len(rows), "shown": min(len(rows), SHOWN), "rows": rows[:SHOWN]}
 
 
@@ -32,9 +33,10 @@ def download_companies(
     conn: Annotated[Connection, Depends(get_conn)],
     icp: str | None = None,
     search: str | None = None,
+    source: str | None = None,
 ) -> Response:
     icp_or_400(conn, icp)
-    text = exports.csv_text(exports.company_rows(conn, icp, search))
+    text = exports.csv_text(exports.company_rows(conn, icp, search, source))
     return csv_response(text, exports.default_path(Path("."), "companies").name)
 
 

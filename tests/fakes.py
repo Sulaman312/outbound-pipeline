@@ -64,6 +64,13 @@ class FakeApollo:
     def pages_requested(self) -> list[int]:
         return [int(r.url.params["page"]) for r in self.requests]
 
+    def bodies(self) -> list[dict[str, Any]]:
+        """The JSON body of each request (Google Places sends its search in the body)."""
+        return [json.loads(r.content) for r in self.requests]
+
+
+FakeGoogle = FakeApollo  # same idea: queued answers, recorded requests
+
 
 def no_network_client() -> httpx.Client:
     """A client that fails the test if anything tries to send a request."""
@@ -72,6 +79,49 @@ def no_network_client() -> httpx.Client:
         raise AssertionError(f"network used in a test that must not: {request.url}")
 
     return httpx.Client(transport=httpx.MockTransport(refuse))
+
+
+def place(number: int, website: str | None = "default", **fields: Any) -> dict[str, Any]:
+    """One Google place, shaped like Text Search (New) output for our field mask."""
+    record: dict[str, Any] = {
+        "id": f"place{number}",
+        "displayName": {"text": f"Clinic {number}", "languageCode": "en"},
+        "websiteUri": f"https://www.clinic{number}.com/" if website == "default" else website,
+        "formattedAddress": f"{number} Main St, Austin, TX 78701, USA",
+        "addressComponents": [
+            {"longText": "Austin", "shortText": "Austin", "types": ["locality", "political"]},
+            {"longText": "Texas", "shortText": "TX",
+             "types": ["administrative_area_level_1", "political"]},
+            {"longText": "United States", "shortText": "US", "types": ["country", "political"]},
+        ],
+        "nationalPhoneNumber": "(512) 555-0100",
+        "types": ["veterinary_care", "point_of_interest", "establishment"],
+        "primaryType": "veterinary_care",
+        "businessStatus": "OPERATIONAL",
+    }  # fmt: skip
+    if record["websiteUri"] is None:
+        del record["websiteUri"]
+    record.update(fields)
+    return record
+
+
+def places_page(places: list[dict[str, Any]], next_token: str | None = None) -> dict[str, Any]:
+    data: dict[str, Any] = {"places": places}
+    if next_token:
+        data["nextPageToken"] = next_token
+    return data
+
+
+def maps_settings(**fields: Any) -> dict[str, Any]:
+    """Google Maps settings for an ICP, as the ICPs page would send them."""
+    settings: dict[str, Any] = {
+        "queries": ["vet clinic"],
+        "cities": ["Austin, TX"],
+        "region_code": "us",
+        "pages_per_query": 1,
+    }
+    settings.update(fields)
+    return settings
 
 
 def icp_data(key: str = "test_accounting", **fields: Any) -> dict[str, Any]:

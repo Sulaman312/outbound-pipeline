@@ -13,6 +13,8 @@ SETTINGS = """\
 caps:
   apollo:
     credits: 10
+  google_places:
+    requests: 5
 """
 
 _WIPE_ORDER = (
@@ -24,6 +26,8 @@ _WIPE_ORDER = (
     "suppression",
     "usage",
     "sourcing_progress",
+    "query_progress",
+    "places",
 )
 
 

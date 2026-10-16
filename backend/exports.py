@@ -15,7 +15,18 @@ from backend import db
 from backend.db import Connection
 
 # Headcount, location and industry columns come back once the email step fills them.
-COLUMNS = ("domain", "name", "icp", "linkedin_url", "status", "source", "created_at")
+COLUMNS = (
+    "domain",
+    "name",
+    "icp",
+    "source",
+    "city",
+    "state",
+    "linkedin_url",
+    "status",
+    "likely_chain",
+    "created_at",
+)
 LEAD_COLUMNS = (
     "email",
     "first_name",
@@ -43,10 +54,10 @@ def _plain(row: Any, columns: tuple[str, ...]) -> dict[str, object]:
 
 
 def company_rows(
-    conn: Connection, icp: str | None = None, search: str | None = None
+    conn: Connection, icp: str | None = None, search: str | None = None, source: str | None = None
 ) -> list[dict[str, object]]:
     """Saved companies as plain rows with the export columns."""
-    return [_plain(row, COLUMNS) for row in db.list_companies(conn, icp, search)]
+    return [_plain(row, COLUMNS) for row in db.list_companies(conn, icp, search, source)]
 
 
 def lead_rows(conn: Connection, state: str | None = None) -> list[dict[str, object]]:

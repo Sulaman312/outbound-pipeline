@@ -8,21 +8,28 @@ ICPs. Every source saves into the same companies table and feeds the same Clay f
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
 class Field:
     key: str
     label: str
-    kind: str  # "list" (one per line), "ranges" (like 1,10), "int"
+    kind: str  # "list" (one per line), "ranges" (like 1,10), "int", "text", "bool"
     help: str
     required: bool = False
+    default: Any = None  # used when the field is left empty
+    low: int | None = None  # "int": smallest allowed
+    high: int | None = None  # "int": largest allowed
+    pattern: str | None = None  # "text": the value must match this (whole value)
+    pattern_help: str = ""  # "text": what a good value looks like
 
 
 @dataclass(frozen=True)
 class Source:
-    key: str
+    key: str  # used in ICP settings and on the screens, like "google_maps"
     label: str
+    provider: str  # companies.source, and the usage/caps name, like "google_places"
     built: bool
     cost: str  # in plain words, for the screens
     key_env: str  # the .env name of its API key
@@ -34,6 +41,7 @@ SOURCES: tuple[Source, ...] = (
     Source(
         "apollo",
         "Apollo",
+        "apollo",
         True,
         "1 Apollo credit per page of up to 100 companies",
         "APOLLO_API_KEY",
@@ -73,18 +81,54 @@ SOURCES: tuple[Source, ...] = (
     Source(
         "google_maps",
         "Google Maps",
-        False,
-        "not built yet (M1b)",
-        "",  # decided in M1b
-        "",
+        "google_places",
+        True,
+        "1 Google request per page of up to 20 places (free up to 1,000 a month)",
+        "GOOGLE_PLACES_API_KEY",
+        "requests",
         (
             Field(
                 "queries",
                 "Search phrases",
                 "list",
-                'What you would type in Maps, like "vet clinic"',
+                'What you would type in Maps, like "vet clinic". Each one is searched in each city.',
+                required=True,
             ),
-            Field("cities", "Cities", "list", 'Like "Austin, TX"'),
+            Field("cities", "Cities", "list", 'Like "Austin, TX"', required=True),
+            Field(
+                "region_code",
+                "Region code",
+                "text",
+                'Two letters, like "us"',
+                default="us",
+                pattern=r"[a-z]{2}",
+                pattern_help='two letters, like "us"',
+            ),
+            Field(
+                "place_type",
+                "Google place type (optional)",
+                "text",
+                'Only this type of place, like "veterinary_care". Leave empty for any.',
+                pattern=r"[a-z][a-z_]*",
+                pattern_help='lowercase words joined by _, like "veterinary_care"',
+            ),
+            Field(
+                "pages_per_query",
+                "Pages per search",
+                "int",
+                "1 to 3 pages of 20 places. Google stops at 60 places per search.",
+                default=1,
+                low=1,
+                high=3,
+            ),
+            Field(
+                "skip_chains",
+                "Skip chains",
+                "bool",
+                "A website seen at 3 or more places is a likely chain: don't save it, and keep "
+                "it out of Clay",
+                default=True,
+            ),
         ),
     ),
 )

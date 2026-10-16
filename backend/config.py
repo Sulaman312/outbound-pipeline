@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 # Environment variables the pipeline reads. Later steps add to this.
-KNOWN_KEYS: tuple[str, ...] = ("APOLLO_API_KEY", "DATABASE_URL")
+KNOWN_KEYS: tuple[str, ...] = ("APOLLO_API_KEY", "GOOGLE_PLACES_API_KEY", "DATABASE_URL")
 
 
 class ConfigError(Exception):
