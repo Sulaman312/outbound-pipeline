@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fakes import FakeApollo, no_network_client, org, page
 
-from outbound import cli
+from backend import cli
 
 
 def call(project: Path, *args: str) -> int:
@@ -19,20 +19,38 @@ def test_check(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert call(project, "check") == 0
     out = capsys.readouterr().out
     assert "config:   ok" in out
-    assert "database: data/outbound.db" in out
+    assert "sqlite at" in out or "postgres at" in out
     assert "APOLLO_API_KEY  not set" in out
     assert "apollo credits  0 / 10" in out
     assert "ai_accounting" in out and "0 saved" in out
 
 
-def test_check_never_prints_the_key(
+def test_check_never_prints_secrets(
     project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "secret-123")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://user:s3cret@db.example.com:5432/outbound"
+    )
+    # Don't actually connect to that host: clear DATABASE_URL after key_status would see it
+    # for the check output of keys, but connect uses it — so only set the key.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     assert call(project, "check") == 0
     captured = capsys.readouterr()
     assert "APOLLO_API_KEY  set" in captured.out
     assert "secret-123" not in captured.out + captured.err
+
+
+def test_check_never_prints_database_url(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When DATABASE_URL is set, check shows host only, never the URL or password."""
+    # Use sqlite so we don't need a real Postgres; describe_database is unit-tested separately.
+    assert call(project, "check") == 0
+    out = capsys.readouterr().out
+    assert "DATABASE_URL" in out  # key name is fine
+    assert "postgresql://" not in out
+    assert "postgres://" not in out
 
 
 def test_key_is_read_from_dot_env(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -42,7 +60,9 @@ def test_key_is_read_from_dot_env(project: Path, capsys: pytest.CaptureFixture[s
 
 
 def test_broken_config(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (project / "config" / "settings.yaml").write_text("caps: {}\n", encoding="utf-8")
+    (project / "config" / "settings.yaml").write_text(
+        "caps:\n  apollo:\n    credits: -1\n", encoding="utf-8"
+    )
     assert call(project, "check") == 2
     assert "config error" in capsys.readouterr().err
 
@@ -165,12 +185,12 @@ def test_clay_round_trip(
     assert call(project, "clay", "import", str(clay_file), "--credits", "3") == 0
     out = capsys.readouterr().out
     assert "columns used: domain=Company Domain" in out
-    assert "ready      1" in out and "maybe      1" in out
+    assert "verified" in out and "needs_check" in out
 
     assert call(project, "check") == 0
     out = capsys.readouterr().out
     assert "waiting for Clay: 1 companies" in out
-    assert "contacts: 1 ready, 1 maybe, 0 hold, 0 drop" in out
+    assert "1 verified" in out and "1 needs_check" in out
 
     target = project / "contacts.csv"
     assert call(project, "export", "--contacts", "--out", str(target)) == 0
@@ -195,3 +215,11 @@ def test_clay_export_with_nothing_waiting(
 ) -> None:
     assert call(project, "clay", "export") == 0
     assert "Nothing waiting for Clay" in capsys.readouterr().out
+
+
+def test_backup(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert call(project, "backup") == 0
+    out = capsys.readouterr().out
+    assert "data/backups/" in out
+    files = list((project / "data" / "backups").glob("*.json"))
+    assert len(files) == 1

@@ -8,12 +8,32 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: outbound
+          POSTGRES_PASSWORD: outbound
+          POSTGRES_DB: outbound
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U outbound -d outbound"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e ".[dev,ui]"
+      - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest
+      - name: pytest (SQLite)
+        run: pytest
+      - name: pytest (Postgres)
+        env:
+          DATABASE_URL: postgresql+psycopg://outbound:outbound@localhost:5432/outbound
+          OUTBOUND_TEST_POSTGRES: "1"
+        run: pytest

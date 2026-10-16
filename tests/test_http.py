@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from outbound.http import HttpError, send
+from backend.http import HttpError, send
 
 
 def client_with(*steps: object) -> tuple[httpx.Client, list[int]]:

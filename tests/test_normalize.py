@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from outbound.normalize import normalize_domain, normalize_email
+from backend.normalize import normalize_domain, normalize_email
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,10 @@
-"""rules.py: reading Clay's email check, and the ready / maybe / hold / drop decision."""
+"""stages/verify.py: reading Clay's email check, and the verified / needs_check / hold / dropped decision."""
 
 from __future__ import annotations
 
 import pytest
 
-from outbound.rules import clay_status, decide, is_role_address
+from backend.stages.verify import clay_status, decide, is_role_address
 
 
 @pytest.mark.parametrize(
@@ -40,20 +40,20 @@ def test_role_addresses() -> None:
 
 
 @pytest.mark.parametrize(
-    ("email", "status", "suppressed", "decision"),
+    ("email", "status", "suppressed", "state"),
     [
-        (None, "none", False, "drop"),
-        ("jane@acme.com", "valid", True, "drop"),
-        ("jane@acme.com", "invalid", False, "drop"),
+        (None, "none", False, "dropped"),
+        ("jane@acme.com", "valid", True, "dropped"),
+        ("jane@acme.com", "invalid", False, "dropped"),
         ("info@acme.com", "valid", False, "hold"),
-        ("jane@acme.com", "valid", False, "ready"),
-        ("jane@acme.com", "catch_all", False, "maybe"),
-        ("jane@acme.com", "unknown", False, "maybe"),
+        ("jane@acme.com", "valid", False, "verified"),
+        ("jane@acme.com", "catch_all", False, "needs_check"),
+        ("jane@acme.com", "unknown", False, "needs_check"),
     ],
 )
-def test_decide(email: str | None, status: str, suppressed: bool, decision: str) -> None:
-    assert decide(email, status, suppressed)[0] == decision
+def test_decide(email: str | None, status: str, suppressed: bool, state: str) -> None:
+    assert decide(email, status, suppressed)[0] == state
 
 
-def test_maybe_reason_says_what_happens_next() -> None:
+def test_needs_check_reason_says_what_happens_next() -> None:
     assert "re-check with Instantly" in decide("jane@acme.com", "catch_all", False)[1]

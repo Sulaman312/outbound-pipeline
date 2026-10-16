@@ -2,9 +2,9 @@
 
 Read [research.md](research.md) first. Every number here comes from there.
 
-**Status:** steps 0–2 are built: the skeleton, Apollo company sourcing, and the Clay round
-trip, all usable from the web page (see the README). Everything after that is still design. The decisions at the bottom are open
-until Wania marks them DECIDED.
+**Status:** M0a (Foundation) is built: `backend/` package, Supabase Postgres (SQLite for
+tests and offline), stage list, Clay CSV enrich, verify rules. M0b (UI) and M1–M7 are still
+design. See the decisions table at the bottom.
 
 ## Goal
 
@@ -18,205 +18,149 @@ Code does the repeatable parts. Paid tools are used only where they're needed.
 ## The flow
 
 ```
-  Apollo API                    Google Maps (only if D2 = yes)
-  (companies, 1–20 staff)       (local businesses)
-          \                       /
-           v                     v
-         ┌─────────────────────────┐
-         │ companies   (our SQLite)│   one row per domain, ever
-         └─────────────────────────┘
-                     │  clay export  →  CSV batches, sized to Clay's row limit
-                     v
-         Clay, by hand: find decision-maker → find work email → check email
-                     │  clay import  ←  Clay's CSV export
-                     v
-         ┌─────────────────────────┐
-         │ contacts    (our SQLite)│   send / drop / maybe, from Clay's result
-         └─────────────────────────┘
-                     │  verify  →  Instantly verification API (maybes only)
-                     v
-               ready  or  dropped
-                     │  campaign apply  →  campaign settings from a YAML file
-                     │  push            →  ready contacts into the campaign
-                     v
-         Instantly sends from the warmed inboxes
-                     │  sync  ←  replies, bounces, unsubscribes, finished leads
-                     v
-         contacts + suppression updated  →  report
+  Apollo API
+  (companies, 1–20 staff)
+          |
+          v
+  ┌───────────────────────────┐
+  │ companies  (Supabase PG)  │   one row per domain, ever
+  └───────────────────────────┘
+          |  clay export  →  CSV batches (claimed in one UPDATE)
+          v
+  Clay, by hand: find decision-maker → find work email → check email
+          |  clay import  ←  Clay's CSV export
+          v
+  ┌───────────────────────────┐
+  │ leads      (Supabase PG)  │   verified / needs_check / hold / dropped
+  └───────────────────────────┘
+          |  verify (Instantly) for needs_check   [not built]
+          |  personalize → qa → send → track → classify   [not built]
+          v
+  Instantly campaigns (Growth), created by code; Miro campaign logic
 ```
+
+## Stages (`backend/pipeline.py`)
+
+| Stage | Built | Reads | Writes |
+|---|---|---|---|
+| source | yes | — | sourced |
+| enrich | yes | sourced | enriched, verified, needs_check, hold, dropped |
+| verify | yes (rules) | enriched, needs_check | verified, needs_check, hold, dropped |
+| personalize | no | verified | personalized |
+| qa | no | personalized | approved, hold |
+| send | no | approved | in_campaign |
+| track | no | in_campaign | replied, bounced, unsubscribed, finished |
+| classify | no | replied | finished, dropped |
+
+**Lead states:** sourced, enriched, verified, needs_check, hold, personalized, approved,
+in_campaign, replied, bounced, unsubscribed, finished, dropped.
 
 ## Who does what
 
 | Step | Tool | Done by | Why this tool |
 |---|---|---|---|
-| Find companies | Apollo Organization Search (Basic plan, D10) | code | 1 credit per 100 companies. Filters by exact headcount and HQ location, and returns the domain. |
-| Find local businesses | Google Places, or Clay's own Google Maps source | code or Clay | Only if D2 is decided |
-| Find person, email, check it | Clay | you, by hand (CSV in and out) | Best email-finding coverage. Its API is the $495 plan. |
-| Re-check maybes | Instantly verifier | code | 0.25 credits per email, with a catch-all check |
-| Campaigns and sending | Instantly | code (API); Instantly sends | Campaigns live as files in the repo. Instantly handles inbox rotation, warmup and scheduling. |
-| Who was contacted, opt-outs, report | Our SQLite file | code | Instantly Growth has a contact cap and we clear old leads, so our database is the permanent record |
+| Find companies | Apollo Organization Search (Basic plan) | code | 1 credit per 100 companies |
+| Find person, email, check it | Clay | you, by hand (CSV in and out) | Best email coverage; API is the $495 plan |
+| Re-check needs_check | Instantly verifier | code | 0.25 credits per email |
+| Campaigns and sending | Instantly Growth | code creates campaigns; Instantly sends | Miro campaign logic |
+| Record and suppression | Supabase Postgres | code | Shared by two laptops; Instantly contact cap is not the permanent record |
 
-## One month in numbers (Instantly Growth)
+## Data: Supabase Postgres (SQLite for tests)
 
-These are **estimates** to plan with. Month 1 replaces them with real numbers.
-
-| Item | Number | Comes from |
-|---|---|---|
-| Emails Instantly will send | 5,000 a month | Growth plan |
-| New people a month | up to about 1,666 | 3-email sequence; only works if finished leads are cleared (1,000 contact cap) |
-| Inboxes needed | about 8 | 5,000 ÷ 22 days ≈ 230 a day, at 30 per inbox (D7) |
-| Sendable emails Clay must deliver | 1,000–1,600 a month | to fill the above |
-| Companies to feed Clay | 2,000–3,200 | assumes about 50% of companies give a sendable email (we'll measure this) |
-| Apollo credits | 20–32 | Basic plan (exact monthly allowance: check the portal) ✔ |
-| Clay finished leads | Free about 75–150, one trial about 750–2,000, Launch 1,900+ | **the real bottleneck (D3)** |
-| Instantly checks for maybes | about 300–500 = 75–125 credits | Nano credits ($9, 150 credits) ✔ |
-| Positive replies | about 7–30 per 1,000 people | reply-rate benchmarks |
-
-## Data: one SQLite file, small tables
-
-All built (schema version 2). Older databases upgrade automatically without losing data.
-
-SQLite is one file, needs no server, and is built into Python. It answers "have we seen this domain
-or email before?", which CSV files are bad at.
+Schema version 1 (`schema_version` table). Tests use SQLite. Production uses the Supabase
+Session pooler URL (`DATABASE_URL`, port 5432, `sslmode=require`). Row level security is on
+every table (no policies), so the public API key cannot read rows; we connect as the owner.
 
 | Table | Key columns | Rule |
 |---|---|---|
-| `companies` | id, source, source_id, name, domain, city, state, country, employees, industry, linkedin_url, segment, raw, status, created_at | **Unique domain**: a company enters once, from whichever source finds it first. Status goes `new` → `exported` → `enriched` or `no_contact`. |
-| `contacts` | id, company_id, first_name, last_name, title, email, clay_status, verify_status, decision, reason, campaign, instantly_lead_id, state, timestamps | **Unique email.** Decision is `send`, `drop` or `hold`. State goes `ready` → `pushed` → `finished`, `replied`, `bounced` or `unsubscribed`. |
-| `batches` | id, file, rows, clay_account, exported_at, imported_at, emails_found | One row per Clay CSV round trip. This gives the real cost per lead for each Clay account or plan. |
-| `suppression` | value, kind (email, domain or email_hash), reason, added_at | **Never deleted.** Checked before Clay and again before sending. If someone asks for their data to be deleted, we delete it and store only a one-way hash of their email here, so we never contact them again. |
-| `usage` | provider, unit, month, amount | Counts API spend so monthly caps are enforced (Google 1,000 requests, Apollo credits, Instantly credits) |
-| `sourcing_progress` | segment, filters_hash, next_page, total_entries, exhausted | Remembers the next page per segment, so a rerun never pays for the same page twice. Changing a segment's filters starts it again at page 1. |
+| `companies` | id, source, source_id, name, domain, segment, status, … | Unique domain. Status `new` → `exported` → `enriched` or `no_contact`. |
+| `leads` | id, company_id, email, clay_status, state, state_reason, state_changed_at, … | Unique email. States as above. |
+| `batches` | id, file, rows, clay_account, clay_credits, … | One Clay CSV round trip |
+| `suppression` | value, kind, reason | Never deleted |
+| `usage` | provider, unit, month, amount | Monthly caps; Apollo credits reserved before the call |
+| `sourcing_progress` | segment, filters_hash, next_page, exhausted | Never pay for the same page twice |
 
-`raw` stores the provider's original response, so a mapping mistake is fixed by re-reading the
-data instead of paying for it again. Google Places data is the exception: it's stored only if D2
-allows it.
+Concurrency:
 
-## Commands: one per step
+1. Clay export claims companies with one `UPDATE ... RETURNING`.
+2. Apollo credits are reserved in one statement that refuses to go over the cap; failures keep the reservation.
+
+## Commands
 
 ```
-outbound check                                 # config valid? which keys set? usage vs caps this month   [built]
-outbound source SEGMENT [--pages N]            # shows the Apollo query and credit cost; --live runs it    [built]
-outbound export [--segment S]                  # saved companies to a CSV for Excel or Sheets              [built]
-outbound suppress VALUE --reason TEXT          # add a domain or email to the do-not-contact list         [built]
-outbound fields [--segment S]                  # which fields the provider sent (names and counts only)  [built]
-outbound ui                                    # the same steps as a local web page (Streamlit)          [built]
-outbound source places --segment S             # only if D2 = yes
-outbound clay export [--rows 200]              # next companies to data/clay/batch_<time>_<segment>.csv   [built]
-outbound clay import FILE [--account A] [--credits N]  # reads Clay's export, creates contacts, applies rules [built]
-outbound export --contacts                     # the people Clay found, with their decision, to a CSV    [built]
-outbound verify                                # maybes → Instantly verifier (--live)
-outbound campaign apply campaigns/X.yaml       # create or update the Instantly campaign (--live)
-outbound push --campaign X                     # ready contacts → Instantly (--live)
-outbound sync                                  # pull replies, bounces, unsubscribes, finished (--live)
-outbound report                                # counts per stage, bounce rate, cost per lead per batch
+outbound check                                 # config, keys, db host/path, usage, counts   [built]
+outbound backup                                # every table → data/backups/<UTC>.json      [built]
+outbound source SEGMENT [--pages N]            # dry run; --live spends Apollo credits        [built]
+outbound export [--segment S]                  # companies CSV                                [built]
+outbound export --contacts                     # leads CSV                                    [built]
+outbound suppress VALUE --reason TEXT          # do-not-contact                               [built]
+outbound fields [--segment S]                  # Apollo field names and counts                [built]
+outbound clay export [--rows 200]              # claim companies → Clay CSV                   [built]
+outbound clay import FILE [--account A] [--credits N]  # Clay CSV → leads                     [built]
+outbound verify                                # needs_check → Instantly verifier (--live)
+outbound campaign apply … / push / sync / report
 ```
 
-Anything that would call a paid API only shows what it would do, unless you add `--live`.
-
-## Rules the code follows
-
-1. **Dry run by default.** `--live` is needed to spend credits or call a paid API.
-2. **Monthly caps are hard stops.** Raising one is your decision, not the code's.
-3. **Suppression is checked twice:** before export to Clay, and right before pushing to Instantly.
-4. **One company enters once. One email is contacted once.** That holds across all campaigns,
-   unless D11 says otherwise.
-5. **Before clearing finished leads from Instantly,** their outcome is saved in our database.
-6. **Every email has a postal address,** an unsubscribe line and the unsubscribe header.
-   Opt-outs sync at least daily, to meet the 48-hour rule.
-7. **Each API client only calls the endpoints it's allowed to.** Every client has a fixed list of
-   paths and refuses anything else. This matters most when a provider only offers keys that can
-   do everything (like an Apollo master key).
-8. **Secrets live only in `.env`.** `data/` and lead CSVs are never committed, because they hold
-   personal data.
-9. **Tests run offline.** HTTP is faked; no test needs a real key.
+Dry run by default. `--live` is required to spend credits.
 
 ## Code layout
 
 ```
 outbound-pipeline/
-  pyproject.toml          # deps: httpx, PyYAML; dev: pytest, ruff
-  .env.example            # names of the keys, no values
+  pyproject.toml          # httpx, PyYAML, sqlalchemy, psycopg; entry: outbound
+  .env.example            # DATABASE_URL=, APOLLO_API_KEY=
   config/
-    settings.yaml         # caps, paths, Clay column names
-    segments.yaml         # who we target: offer, source, filters
-  campaigns/
-    <name>.yaml           # one Instantly campaign each: schedule, steps, settings
+    settings.yaml         # monthly caps
+    segments.yaml         # targets (M1 replaces with ICPs)
   docs/
-    research.md
-    plan.md
-    clay-table.md         # step-by-step recipe to build the Clay table the same way every time
-  src/outbound/
-    cli.py                # commands only; no logic
-    config.py             # load and check YAML and env
-    db.py                 # SQLite schema and every SQL statement
-    http.py               # the one HTTP sender: timeouts, retry on 429/5xx and failed connects
-    normalize.py          # domains and emails in one normal form
-    ui.py                 # the local web page (Streamlit); calls the step functions, no logic
-    rules.py              # ready / maybe / hold / drop from Clay's result; pure functions (built)
-    clients/
-      apollo.py           # Apollo calls → plain dicts
-      places.py           # Google Places calls (only if D2)
-      instantly.py        # verify, campaigns, leads, emails, blocklist
-    steps/
-      source.py  export.py  suppress.py  fields.py  clay.py   (built)
-      verify.py  campaign.py  push.py  sync.py  report.py
-  tests/                  # offline; fake HTTP; sample CSVs
+    research.md  plan.md  guide.md  clay-table.md
+  backend/
+    cli.py                # commands only
+    config.py             # settings + .env
+    db.py                 # engine, schema, every SQL statement
+    http.py  normalize.py
+    pipeline.py           # STAGES + LEAD_STATES
+    suppression.py  exports.py  fields.py
+    integrations/apollo.py
+    stages/source.py  enrich.py  verify.py
+  scripts/copy_sqlite_to_db.py
+  tests/                  # offline on SQLite; CI also runs against Postgres
 ```
 
-The structure stays basic on purpose:
+## Decisions
 
-- Plain functions.
-- Standard library first.
-- No plugin systems or base classes until a second real use exists.
-
-## Decisions needed from you
-
-Each decision is open until marked DECIDED. The "Suggestion" column is my view; the decision is
-yours.
-
-| # | Question | Options | Suggestion |
-|---|---|---|---|
-| D1 | Which source for which offer? | (a) Apollo for both offers. (b) Apollo for front-end, Google Maps for AI automation at local businesses. (c) Both sources for both. | Month 1: (a) Apollo only. Add local businesses in month 2. |
-| D2 | Google Maps, given Google's ban on storing Places data | (a) Use the Places API and accept the risk. (b) Use Clay's own Google Maps source instead. (c) Skip Google Maps. | Decide in month 2. If yes, (b) keeps us off Google's terms, but it uses Clay rows. |
-| D3 | Clay: which plan, how many accounts | (a) Free only, about 75–150 a month. (b) Trials rotated: about 750–2,000 each, 50-row tables, terms risk. (c) Launch $185/mo. Also worth one test as email sources: Apollo Basic ($49), Instantly SuperSearch credits. | **DECIDED (2026-10-15): Clay for emails**, through a CSV round trip with no Google Sheet in between (built). Still open: which plan or how many accounts. Record credits per batch on import; after a few batches the batches table shows the cost per ready email. |
-| D4 | Maybes and catch-alls | Instantly re-checks maybes. If still catch-all or unknown: (a) drop, (b) hold, (c) send a capped share. | Buy Nano credits ($9). Hold in month 1. Test a 10% share in month 2 if bounces stay under 1%. |
-| D5 | Role-based emails (`info@`, `contact@`) | (a) Drop. (b) Allow for local businesses only. (c) Allow. | (a) for Apollo leads, since we want a named person. Revisit with D2. |
-| D6 | Instantly plan, and clearing finished leads | (a) Growth; code saves outcomes, then deletes finished leads to free space. (b) Hypergrowth $97: no clearing, has webhooks. | (a) |
-| D7 | Inboxes | How many are warming? Since when? Daily limit per inbox? | Need your numbers. Default 30 a day each once warmup is past 2 weeks. |
-| D8 | CAN-SPAM details | Which postal address (a USPS PO box is fine)? How does the footer say it's an offer? Wording of the unsubscribe line? | You decide the wording; the code makes sure it's in every email. |
-| D9 | Sequence shape | Number of steps, gap between them, one offer per campaign or mixed | 3 plain-text emails (day 0, +3, +7). One offer per campaign. Stop on reply. Open and link tracking off. |
-| D10 | **Where companies come from** (Apollo Free has no API access; confirmed Oct 2026) | (a) Apollo Basic ($49/mo annual; monthly price higher): full API for companies, people and emails, about 2,500 credits a month. Its emails could replace much of Clay's job. (b) Clay "Find companies": free list building, but 200-row tables on Free; Clay then does companies, people and emails in one table. (c) Apollo website on Free, by hand: CSV export 25 at a time. Slow. (d) Google Places API: see D2. | **DECIDED (2026-10-15): (a) Apollo Basic.** Bought; key is in `.env`. Still open under D3: whether emails come from Apollo enrichment or Clay. Compare both on the same companies in month 1. |
-| D11 | Re-contact | Contact a person once ever? Once per offer? Again after N months? | Once per offer. Never again after a reply, unsubscribe or bounce. |
-| D12 | Where the database lives | (a) SQLite file on the machine that runs the pipeline: zero setup, $0, offline tests, needs our own daily backup. (b) Supabase (hosted Postgres): shared and has a web table view. Free tier pauses after 1 week idle, has no backups, 500 MB. Pro is $25/mo with daily backups. Adds an account, a connection secret and a Postgres driver. | (a) while one person runs the commands. Switch to (b) when several people run it from different machines, someone needs a web view of the leads, or it moves to a server on a schedule. All SQL stays in `db.py`, so the switch touches one file. |
-| D13 | AI-written first line per email | (a) No, same template for all. (b) Yes: an AI model writes one line from the company data, and a person approves it. The teammate's prototype did this with Claude. | Snooze until sending works end to end. Then test it as a variant against the plain template. |
-| D14 | A screen (UI) instead of typed commands | (a) typed commands only (b) a small local web page (Streamlit) | **DECIDED (2026-10-15): (b).** First version built for sourcing (`outbound ui`): overview, find companies, companies table + CSV, do-not-contact. Each new step adds its tab. Runs on localhost only. |
+| # | Question | Decision |
+|---|---|---|
+| D1 | Which source for which offer? | **OPEN.** Suggestion: Apollo for both in month 1. |
+| D2 | Google Maps / Places? | **OPEN.** Decide in month 2. |
+| D3 | Emails: Clay waterfall; plan/accounts | **DECIDED (M0a):** Clay waterfall through CSV export/import, no Google Sheet for now. Whether Apollo also supplies emails is decided in M1. Plan/account count still open; record credits per batch on import. |
+| D4 | Email check / maybes | **DECIDED (M0a):** Clay "valid" = verified (ready). Catch-all/unknown = needs_check, re-checked with Instantly's verifier. Hold for role addresses until D5. |
+| D5 | Role-based emails (`info@`) | **OPEN.** Suggestion: drop for Apollo leads. |
+| D6 | Instantly plan | **DECIDED (M0a):** Growth plan; campaigns created in Instantly by code. Clearing finished leads still to confirm vs Hypergrowth. |
+| D7 | Inboxes | **OPEN.** Need numbers. |
+| D8 | CAN-SPAM details | **OPEN.** |
+| D9 | Sequence / tracking / campaigns | **DECIDED (M0a):** Follow the Miro campaign logic; campaigns created in Instantly (Growth) by code. |
+| D10 | Where companies come from | **DECIDED (2026-10-15):** Apollo Basic. Whether emails also come from Apollo is M1. |
+| D11 | Re-contact | **OPEN.** Suggestion: once per offer. |
+| D12 | Where the database lives | **DECIDED (M0a):** Supabase Postgres, shared by two laptops. Tests use SQLite. |
+| D13 | AI-written first line | **OPEN.** Snooze until sending works. |
+| D14 | UI | **DECIDED (M0a):** FastAPI + React (Vite). Streamlit is removed. Built in M0b. |
 
 ## Build order
 
-Each step is small, tested, and usable on its own. Each one starts as a dry run, then gets one
-tiny live test, and only with your go-ahead.
-
-Each step starts only once the decisions it needs are made. All work goes straight to `main`
-(Wania's choice: no branches).
-
 | Step | What | Needs |
 |---|---|---|
-| 0 | **Built.** Skeleton: pyproject, config loading, SQLite schema, `check`, CI (ruff and pytest). No network. | nothing |
-| 1 | **Built.** Apollo company sourcing, plus `export` and `suppress`. First live test: 1 page = 1 credit. Segments and cap are starting values to edit. | D1, segments, cap |
-| 2 | **Built.** Clay CSV export and import, batches, contacts, rules, `docs/clay-table.md`, and the Clay and Contacts tabs. Clay's column names are detected, and can be picked in the UI. | D3 |
-| 3 | Rules and the Instantly verifier. First live test: 1 email. | D4, D5 |
-| 4 | Campaign from a file, and pushing leads. First live test: one campaign left as a draft. | D6–D9 |
-| 5 | Sync, suppression, clearing finished leads | D6, D11 |
-| 6 | Report | — |
-| 7 | Google Places | only if D2 = yes |
+| M0a | **Built.** Foundation: `backend/` layout, Supabase/SQLite, pipeline stages, Clay CSV, verify rules, backup, copy script, CI on Postgres. | D3, D4, D9, D12, D14 (partial) |
+| M0b | FastAPI + React (Vite) UI for the built stages | D14 |
+| M1 | ICPs replace segments; decide Apollo vs Clay for emails | D1, D3/D10 email source |
+| M2 | Instantly verifier for needs_check | D4, D5 |
+| M3 | Campaign from Miro logic; push leads | D6–D9 |
+| M4 | Sync, suppression, clearing finished leads | D6, D11 |
+| M5 | Report | — |
+| M6 | Personalize / QA gates | D13 if AI line |
+| M7 | Google Places | only if D2 = yes |
 
 ## What was binned
 
-The earlier setup was removed:
-
-- The code in `src/` and its tests.
-- `config/`: 3 target profiles, plus AU and UK compliance rules.
-- `ARCHITECTURE.md`, the CI workflow and `pyproject.toml`.
-
-`.gitignore` was kept. Everything removed is still in git history at commit `532f68b`.
+Earlier layouts (`src/outbound`, Streamlit UI) were removed in M0a. Everything removed is still in
+git history.

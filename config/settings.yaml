@@ -1,6 +1,3 @@
-# Paths are relative to the project folder.
-database: data/outbound.db
-
 # Monthly hard caps. The code stops before going over them.
 # Apollo charges 1 credit per page of up to 100 companies, so 50 credits = up to 5,000 companies.
 # Raise only when you mean to spend more.

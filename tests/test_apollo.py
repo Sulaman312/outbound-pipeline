@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fakes import FakeApollo, org, page
 
-from outbound import http
-from outbound.clients import apollo
-from outbound.config import Segment, load_segments
+from backend import http
+from backend.config import Segment, load_segments
+from backend.integrations import apollo
 
 
 @pytest.fixture

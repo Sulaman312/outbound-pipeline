@@ -6,17 +6,15 @@ for the closest match.
 
 ## 1. Make the file for Clay (our app)
 
-On the web page (`outbound ui`):
+```
+outbound clay export --rows 200
+```
 
-1. Open the **Clay** tab, section "1. Send companies to Clay".
-2. Pick a segment, or "All segments".
-3. Set **Companies per file**:
-   - **200** on Clay Free;
-   - **50** on a Clay trial (trial tables only take 50 rows).
-4. Click **Create the Clay file**, then **Download the Clay file**.
+Use `--rows 50` on a Clay trial (trial tables only take 50 rows). Add `--segment NAME` for one
+segment only.
 
-Those companies are now marked "sent to Clay" and will never go out twice. The command-line
-version is `outbound clay export --rows 200`.
+Those companies are now marked "sent to Clay" and will never go out twice. Two laptops never
+claim the same company.
 
 The file has 5 columns: `company_id` (ours, so the results can be matched back), `domain`,
 `name`, `linkedin_url` and `segment`.
@@ -56,36 +54,30 @@ batch cost; you'll type it in at step 6.
 
 In the people table: **Actions → Export → Download CSV**.
 
-You don't need to rename or delete any columns.
+You don't need to rename or delete any columns. Prefer names the importer recognises (Work Email,
+Validate Email, Company Domain, First Name, Last Name, Job Title, LinkedIn Profile).
 
 ## 6. Bring the results back (our app)
-
-1. Back in the **Clay** tab, section "2. Bring Clay's results back": drop the downloaded CSV in.
-2. **Check the dropdowns.** The app guesses which Clay column is the email, the check result,
-   the company domain, the name and the title. Fix any guess that's wrong.
-3. **Optional:** type which Clay account ran it, and how many credits it used. The batches table
-   then shows the cost per ready email, which is the number for deciding between Free, a trial
-   and Launch.
-4. Click **Import**.
-
-The command-line version is:
 
 ```
 outbound clay import path\to\clay.csv --account "clay-1" --credits 40
 ```
 
+`--account` and `--credits` are optional. Credits per batch let you compare Free, trial and Launch
+on cost per verified email.
+
 ## What happens to each person
 
-| Decision | When | What happens next |
+| State | When | What happens next |
 |---|---|---|
-| **ready** | Clay says valid | Goes to Instantly (next step) |
-| **maybe** | Catch-all or unknown | Re-checked with Instantly's verifier first |
+| **verified** | Clay says valid | Ready for later stages |
+| **needs_check** | Catch-all or unknown | Re-checked with Instantly's verifier first |
 | **hold** | Role address like info@ or sales@ | Waits for your decision D5 |
-| **drop** | No email, invalid, or on the do-not-contact list | Never sent |
+| **dropped** | No email, invalid, or on the do-not-contact list | Never sent |
 
 **Companies:**
 - A company Clay found nobody for becomes `no_contact`.
 - A company with an email becomes `enriched`.
 
-**Importing the same file twice is safe:** repeats are skipped. See everything in the
-**Contacts** tab, or with `outbound export --contacts`.
+**Importing the same file twice is safe:** repeats are skipped. See everything with
+`outbound export --contacts` or `outbound check`.

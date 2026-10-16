@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from outbound.config import ConfigError, key_status, load_env, load_segments, load_settings
+from backend.config import ConfigError, key_status, load_env, load_segments, load_settings
 
 
 def write(project: Path, name: str, text: str) -> None:
@@ -16,8 +16,8 @@ def write(project: Path, name: str, text: str) -> None:
 
 def test_valid_settings_load(project: Path) -> None:
     settings = load_settings(project)
-    assert settings.database == (project / "data" / "outbound.db").resolve()
     assert settings.caps == {"apollo": {"credits": 10}}
+    assert settings.root == project
 
 
 def test_missing_settings_file(tmp_path: Path) -> None:
@@ -26,14 +26,14 @@ def test_missing_settings_file(tmp_path: Path) -> None:
 
 
 def test_unknown_settings_key(project: Path) -> None:
-    write(project, "settings.yaml", "database: x.db\ncaps: {apollo: {credits: 1}}\ndatabse: y\n")
+    write(project, "settings.yaml", "caps: {apollo: {credits: 1}}\ndatabse: y\n")
     with pytest.raises(ConfigError, match="databse"):
         load_settings(project)
 
 
 @pytest.mark.parametrize("value", ["-1", "ten", "true", "1.5"])
 def test_bad_cap(project: Path, value: str) -> None:
-    write(project, "settings.yaml", f"database: x.db\ncaps:\n  apollo:\n    credits: {value}\n")
+    write(project, "settings.yaml", f"caps:\n  apollo:\n    credits: {value}\n")
     with pytest.raises(ConfigError, match="caps.apollo.credits"):
         load_settings(project)
 
@@ -113,6 +113,8 @@ def test_load_env_missing_file_is_fine(tmp_path: Path) -> None:
 
 def test_key_status_only_booleans(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APOLLO_API_KEY", "secret-123")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     status = key_status()
-    assert status == {"APOLLO_API_KEY": True}
+    assert status["APOLLO_API_KEY"] is True
+    assert status["DATABASE_URL"] is False
     assert "secret-123" not in repr(status)
